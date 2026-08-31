@@ -2,71 +2,45 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
+import { TimeWheelPicker } from '@/components/time-wheel-picker';
 import { BrandColors } from '@/constants/theme';
+import {
+  createOccurredAtFromSelection,
+  CATEGORIES,
+  Category,
+  DAILY_SATISFACTIONS_STORAGE_KEY,
+  DailySatisfactions,
+  ExpenseRecord,
+  formatRecordTime,
+  getDateKey,
+  getLocalDateKey,
+  getRecordTimeSelection,
+  migrateExpenseRecord,
+  RECORDS_STORAGE_KEY,
+  SATISFACTIONS,
+  Satisfaction,
+  StoredExpenseRecord,
+  TimeSelection,
+} from '@/lib/expense-record';
 
-const RECORDS_STORAGE_KEY = '@my-money-app/expense-records';
-const DAILY_SATISFACTIONS_STORAGE_KEY = '@my-money-app/daily-satisfactions';
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-
-type Satisfaction = '😫' | '😕' | '😐' | '🙂' | '😍';
-type DailySatisfactions = Record<string, Satisfaction>;
-
-type ExpenseRecord = {
-  id: string;
-  amount: number;
-  category: string;
-  satisfaction: Satisfaction;
-  memo: string;
-  createdAt: string;
-  localDate: string;
-  timeZone: string;
-};
-
-function getDateKey(year: number, monthIndex: number, day: number) {
-  const month = String(monthIndex + 1).padStart(2, '0');
-  const date = String(day).padStart(2, '0');
-
-  return `${year}-${month}-${date}`;
-}
-
-function getLocalDateKey(date: Date) {
-  return getDateKey(date.getFullYear(), date.getMonth(), date.getDate());
-}
 
 function formatSelectedDate(dateKey: string) {
   const [year, month, day] = dateKey.split('-').map(Number);
   return `${year}년 ${month}월 ${day}일`;
-}
-
-function formatRecordTime(record: ExpenseRecord) {
-  const createdDate = new Date(record.createdAt);
-
-  try {
-    return new Intl.DateTimeFormat('ko-KR', {
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZone: record.timeZone,
-    }).format(createdDate);
-  } catch (error) {
-    console.error('기록 당시 시간대로 시각을 표시하지 못했습니다.', error);
-
-    try {
-      return new Intl.DateTimeFormat('ko-KR', {
-        hour: 'numeric',
-        minute: '2-digit',
-      }).format(createdDate);
-    } catch {
-      return '시간 정보 없음';
-    }
-  }
 }
 
 export default function CalendarScreen() {
@@ -77,6 +51,16 @@ export default function CalendarScreen() {
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [dailySatisfactions, setDailySatisfactions] = useState<DailySatisfactions>({});
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editCategory, setEditCategory] = useState<Category | null>(null);
+  const [editSatisfaction, setEditSatisfaction] = useState<Satisfaction | null>(null);
+  const [editMemo, setEditMemo] = useState('');
+  const [editTime, setEditTime] = useState<TimeSelection>({
+    hour: 12,
+    minute: 0,
+    period: 'AM',
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -97,7 +81,27 @@ export default function CalendarScreen() {
             const parsedRecords: unknown = JSON.parse(savedRecords);
 
             if (Array.isArray(parsedRecords)) {
-              setRecords(parsedRecords as ExpenseRecord[]);
+              const storedRecords = parsedRecords as StoredExpenseRecord[];
+              const needsMigration = storedRecords.some(
+                (record) => !record.occurredAt || !record.localDate || !record.timeZone
+              );
+              const migratedRecords = storedRecords.map(migrateExpenseRecord);
+
+              setRecords(migratedRecords);
+
+              if (needsMigration) {
+                try {
+                  await AsyncStorage.setItem(
+                    RECORDS_STORAGE_KEY,
+                    JSON.stringify(migratedRecords)
+                  );
+                } catch (migrationError) {
+                  console.error(
+                    '소비 시각을 보완한 기록을 다시 저장하지 못했습니다.',
+                    migrationError
+                  );
+                }
+              }
             } else {
               console.error('저장된 소비 기록이 배열 형태가 아닙니다.');
             }
@@ -170,7 +174,7 @@ export default function CalendarScreen() {
     return records
       .filter((record) => record.localDate === selectedDateKey)
       .sort((first, second) => {
-        return new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime();
+        return new Date(second.occurredAt).getTime() - new Date(first.occurredAt).getTime();
       });
   }, [records, selectedDateKey]);
 
@@ -180,6 +184,124 @@ export default function CalendarScreen() {
   );
   const selectedDailySatisfaction =
     selectedDateKey === null ? null : (dailySatisfactions[selectedDateKey] ?? null);
+  const canEditDailySatisfaction =
+    selectedRecords.length > 0 || selectedDailySatisfaction !== null;
+  const canSaveEdit =
+    editingRecord !== null &&
+    Number(editAmount) > 0 &&
+    editCategory !== null &&
+    editSatisfaction !== null;
+
+  const openEditModal = (record: ExpenseRecord) => {
+    setEditingRecord(record);
+    setEditAmount(String(record.amount));
+    setEditCategory(record.category);
+    setEditSatisfaction(record.satisfaction);
+    setEditMemo(record.memo);
+    setEditTime(getRecordTimeSelection(record));
+  };
+
+  const closeEditModal = () => {
+    setEditingRecord(null);
+  };
+
+  const saveEditedRecord = async () => {
+    if (
+      !canSaveEdit ||
+      editingRecord === null ||
+      editCategory === null ||
+      editSatisfaction === null
+    ) {
+      return;
+    }
+
+    const updatedOccurredAt = createOccurredAtFromSelection(
+      editingRecord.localDate,
+      editingRecord.timeZone,
+      editTime
+    );
+
+    if (updatedOccurredAt === null) {
+      Alert.alert(
+        '시간을 저장할 수 없어요',
+        '기록 당시 시간대에서 사용할 수 있는 시간을 입력해 주세요.'
+      );
+      return;
+    }
+
+    const updatedRecord: ExpenseRecord = {
+      ...editingRecord,
+      amount: Number(editAmount),
+      category: editCategory,
+      satisfaction: editSatisfaction,
+      memo: editMemo.trim(),
+      occurredAt: updatedOccurredAt,
+    };
+    const updatedRecords = records.map((item) =>
+      item.id === editingRecord.id ? updatedRecord : item
+    );
+
+    setRecords(updatedRecords);
+    setEditingRecord(null);
+
+    try {
+      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+    } catch (error) {
+      console.error('수정한 소비 기록을 저장하지 못했습니다.', error);
+    }
+  };
+
+  const deleteRecord = async (recordId: string) => {
+    const updatedRecords = records.filter((record) => record.id !== recordId);
+
+    setRecords(updatedRecords);
+    setEditingRecord(null);
+
+    try {
+      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+    } catch (error) {
+      console.error('소비 기록을 삭제한 결과를 저장하지 못했습니다.', error);
+    }
+  };
+
+  const confirmDeleteRecord = () => {
+    if (editingRecord === null) {
+      return;
+    }
+
+    const recordId = editingRecord.id;
+
+    Alert.alert('이 소비 기록을 삭제할까요?', '삭제한 기록은 되돌릴 수 없어요.', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: () => void deleteRecord(recordId),
+      },
+    ]);
+  };
+
+  const updateDailySatisfaction = async (value: Satisfaction) => {
+    if (selectedDateKey === null || !canEditDailySatisfaction) {
+      return;
+    }
+
+    const updatedDailySatisfactions = {
+      ...dailySatisfactions,
+      [selectedDateKey]: value,
+    };
+
+    setDailySatisfactions(updatedDailySatisfactions);
+
+    try {
+      await AsyncStorage.setItem(
+        DAILY_SATISFACTIONS_STORAGE_KEY,
+        JSON.stringify(updatedDailySatisfactions)
+      );
+    } catch (error) {
+      console.error('선택한 날짜의 하루 만족도를 저장하지 못했습니다.', error);
+    }
+  };
 
   const moveMonth = (amount: number) => {
     setSelectedDateKey(null);
@@ -288,9 +410,31 @@ export default function CalendarScreen() {
             <View style={styles.summaryCard}>
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>하루의 소비</Text>
-                <Text style={styles.summarySatisfaction}>
-                  {selectedDailySatisfaction ?? '—'}
-                </Text>
+                {canEditDailySatisfaction ? (
+                  <View style={styles.summarySatisfactionRow}>
+                    {SATISFACTIONS.map((item) => {
+                      const isSelected = selectedDailySatisfaction === item;
+
+                      return (
+                        <Pressable
+                          accessibilityLabel={`선택한 날짜의 하루 전체 소비 만족도 ${item}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
+                          key={item}
+                          onPress={() => void updateDailySatisfaction(item)}
+                          style={({ pressed }) => [
+                            styles.summarySatisfactionButton,
+                            isSelected && styles.summarySatisfactionButtonSelected,
+                            pressed && styles.buttonPressed,
+                          ]}>
+                          <Text style={styles.summarySatisfactionEmoji}>{item}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <Text style={styles.summarySatisfactionEmpty}>—</Text>
+                )}
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
@@ -314,7 +458,15 @@ export default function CalendarScreen() {
             ) : (
               <View style={styles.detailList}>
                 {selectedRecords.map((record) => (
-                  <View key={record.id} style={styles.detailRecord}>
+                  <Pressable
+                    accessibilityLabel={`${record.category} ${record.amount.toLocaleString('ko-KR')}원 기록 수정`}
+                    accessibilityRole="button"
+                    key={record.id}
+                    onPress={() => openEditModal(record)}
+                    style={({ pressed }) => [
+                      styles.detailRecord,
+                      pressed && styles.detailRecordPressed,
+                    ]}>
                     <View style={styles.detailRecordMain}>
                       <Text style={styles.detailCategory}>{record.category}</Text>
                       <View style={styles.detailAmountGroup}>
@@ -335,13 +487,172 @@ export default function CalendarScreen() {
                       )}
                       <Text style={styles.detailTime}>{formatRecordTime(record)}</Text>
                     </View>
-                  </View>
+                  </Pressable>
                 ))}
               </View>
             )}
           </View>
         ) : null}
       </ScrollView>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={closeEditModal}
+        transparent
+        visible={editingRecord !== null}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalKeyboardView}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <ScrollView
+                contentContainerStyle={styles.modalContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}>
+                <View style={styles.modalHeader}>
+                  <View>
+                    <Text style={styles.modalTitle}>소비 기록 수정</Text>
+                    {editingRecord ? (
+                      <Text style={styles.modalDate}>
+                        {formatSelectedDate(editingRecord.localDate)} · {editingRecord.timeZone}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Pressable
+                    accessibilityLabel="수정 닫기"
+                    accessibilityRole="button"
+                    hitSlop={8}
+                    onPress={closeEditModal}
+                    style={({ pressed }) => [
+                      styles.modalCloseButton,
+                      pressed && styles.buttonPressed,
+                    ]}>
+                    <Text style={styles.modalCloseText}>×</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.editSection}>
+                  <Text style={styles.editLabel}>금액</Text>
+                  <View style={styles.editAmountInputContainer}>
+                    <TextInput
+                      accessibilityLabel="수정할 소비 금액"
+                      keyboardType="number-pad"
+                      maxLength={10}
+                      onChangeText={(value) => setEditAmount(value.replace(/[^0-9]/g, ''))}
+                      style={styles.editAmountInput}
+                      value={editAmount}
+                    />
+                    <Text style={styles.editCurrency}>원</Text>
+                  </View>
+                </View>
+
+                <View style={styles.editSection}>
+                  <Text style={styles.editLabel}>카테고리</Text>
+                  <View style={styles.editOptionGrid}>
+                    {CATEGORIES.map((item) => {
+                      const isSelected = editCategory === item;
+
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
+                          key={item}
+                          onPress={() => setEditCategory(item)}
+                          style={({ pressed }) => [
+                            styles.editCategoryButton,
+                            isSelected && styles.editCategoryButtonSelected,
+                            pressed && styles.buttonPressed,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.editCategoryText,
+                              isSelected && styles.editCategoryTextSelected,
+                            ]}>
+                            {item}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.editSection}>
+                  <Text style={styles.editLabel}>개별 소비 만족도</Text>
+                  <View style={styles.editSatisfactionRow}>
+                    {SATISFACTIONS.map((item) => {
+                      const isSelected = editSatisfaction === item;
+
+                      return (
+                        <Pressable
+                          accessibilityLabel={`수정할 만족도 ${item}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
+                          key={item}
+                          onPress={() => setEditSatisfaction(item)}
+                          style={({ pressed }) => [
+                            styles.editSatisfactionButton,
+                            isSelected && styles.editSatisfactionButtonSelected,
+                            pressed && styles.buttonPressed,
+                          ]}>
+                          <Text style={styles.editSatisfactionEmoji}>{item}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.editSection}>
+                  <Text style={styles.editLabel}>메모 (선택)</Text>
+                  <TextInput
+                    accessibilityLabel="수정할 소비 메모"
+                    maxLength={100}
+                    onChangeText={setEditMemo}
+                    placeholder="간단한 메모"
+                    placeholderTextColor="#9CA3AF"
+                    style={styles.editMemoInput}
+                    value={editMemo}
+                  />
+                </View>
+
+                <View style={styles.editSection}>
+                  <Text style={styles.editLabel}>소비 시간</Text>
+                  <TimeWheelPicker onChange={setEditTime} value={editTime} />
+                </View>
+
+                <View style={styles.modalActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={confirmDeleteRecord}
+                    style={({ pressed }) => [
+                      styles.deleteButton,
+                      pressed && styles.buttonPressed,
+                    ]}>
+                    <Text style={styles.deleteButtonText}>삭제</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !canSaveEdit }}
+                    disabled={!canSaveEdit}
+                    onPress={() => void saveEditedRecord()}
+                    style={({ pressed }) => [
+                      styles.saveButton,
+                      !canSaveEdit && styles.saveButtonDisabled,
+                      pressed && canSaveEdit && styles.saveButtonPressed,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.saveButtonText,
+                        !canSaveEdit && styles.saveButtonTextDisabled,
+                      ]}>
+                      저장
+                    </Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -476,27 +787,50 @@ const styles = StyleSheet.create({
     borderColor: '#E3E7DF',
     borderRadius: 14,
     borderWidth: 1,
-    flexDirection: 'row',
     marginBottom: 24,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
   summaryItem: {
     alignItems: 'center',
     flex: 1,
     gap: 7,
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
   summaryDivider: {
     backgroundColor: '#E8EBE5',
-    width: StyleSheet.hairlineWidth,
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 14,
   },
   summaryLabel: {
     color: '#777E74',
     fontSize: 12,
     fontWeight: '600',
   },
-  summarySatisfaction: {
+  summarySatisfactionRow: {
+    flexDirection: 'row',
+    gap: 3,
+  },
+  summarySatisfactionButton: {
+    alignItems: 'center',
+    backgroundColor: '#FAFBF8',
+    borderColor: '#E3E7DF',
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 34,
+    justifyContent: 'center',
+    width: 28,
+  },
+  summarySatisfactionButtonSelected: {
+    backgroundColor: BrandColors.primarySoft,
+    borderColor: BrandColors.primary,
+    borderWidth: 2,
+  },
+  summarySatisfactionEmoji: {
+    fontSize: 18,
+  },
+  summarySatisfactionEmpty: {
     color: '#343832',
     fontSize: 24,
     fontWeight: '700',
@@ -536,6 +870,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  detailRecordPressed: {
+    backgroundColor: '#F4F7F0',
+    borderColor: BrandColors.primary,
   },
   detailRecordMain: {
     alignItems: 'center',
@@ -581,5 +919,236 @@ const styles = StyleSheet.create({
   detailTime: {
     color: '#92988F',
     fontSize: 12,
+  },
+  modalKeyboardView: {
+    flex: 1,
+  },
+  modalOverlay: {
+    backgroundColor: 'rgba(25, 29, 23, 0.35)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#FAFBF8',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '92%',
+    overflow: 'hidden',
+  },
+  modalContent: {
+    paddingBottom: 34,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+  },
+  modalHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 22,
+  },
+  modalTitle: {
+    color: '#20231D',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  modalDate: {
+    color: '#7A8177',
+    fontSize: 12,
+    marginTop: 5,
+  },
+  modalCloseButton: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  modalCloseText: {
+    color: '#596057',
+    fontSize: 30,
+    fontWeight: '300',
+    lineHeight: 32,
+  },
+  editSection: {
+    gap: 8,
+    marginBottom: 18,
+  },
+  editLabel: {
+    color: '#343832',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  editAmountInputContainer: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 48,
+    paddingHorizontal: 13,
+  },
+  editAmountInput: {
+    color: '#20231D',
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '700',
+    paddingVertical: 8,
+  },
+  editCurrency: {
+    color: '#596057',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  editOptionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  editCategoryButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 11,
+    borderWidth: 1,
+    flexBasis: '22%',
+    minHeight: 42,
+    justifyContent: 'center',
+  },
+  editCategoryButtonSelected: {
+    backgroundColor: BrandColors.primary,
+    borderColor: BrandColors.primary,
+  },
+  editCategoryText: {
+    color: '#596057',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  editCategoryTextSelected: {
+    color: BrandColors.onPrimary,
+  },
+  editSatisfactionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  editSatisfactionButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    height: 46,
+    justifyContent: 'center',
+  },
+  editSatisfactionButtonSelected: {
+    backgroundColor: BrandColors.primarySoft,
+    borderColor: BrandColors.primary,
+    borderWidth: 2,
+  },
+  editSatisfactionEmoji: {
+    fontSize: 24,
+  },
+  editMemoInput: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 12,
+    borderWidth: 1,
+    color: '#343832',
+    fontSize: 14,
+    height: 44,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+  editTimeRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  editTimeInput: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 11,
+    borderWidth: 1,
+    color: '#20231D',
+    fontSize: 18,
+    fontWeight: '700',
+    height: 46,
+    textAlign: 'center',
+    width: 56,
+  },
+  editTimeColon: {
+    color: '#596057',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  periodControl: {
+    backgroundColor: '#E9EDE6',
+    borderRadius: 11,
+    flex: 1,
+    flexDirection: 'row',
+    marginLeft: 4,
+    padding: 3,
+  },
+  periodButton: {
+    alignItems: 'center',
+    borderRadius: 9,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  periodButtonSelected: {
+    backgroundColor: BrandColors.primary,
+  },
+  periodText: {
+    color: '#6C736A',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  periodTextSelected: {
+    color: BrandColors.onPrimary,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  deleteButton: {
+    alignItems: 'center',
+    borderColor: '#E5B5AF',
+    borderRadius: 13,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 50,
+    width: 82,
+  },
+  deleteButtonText: {
+    color: '#B84C43',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  saveButton: {
+    alignItems: 'center',
+    backgroundColor: BrandColors.primary,
+    borderRadius: 13,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#E5E8E2',
+  },
+  saveButtonPressed: {
+    backgroundColor: BrandColors.primaryPressed,
+  },
+  saveButtonText: {
+    color: BrandColors.onPrimary,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  saveButtonTextDisabled: {
+    color: '#9AA097',
+  },
+  buttonPressed: {
+    opacity: 0.72,
   },
 });

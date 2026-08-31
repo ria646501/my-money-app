@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,60 +14,31 @@ import {
   View,
 } from 'react-native';
 
+import {
+  ExpenseEditValues,
+  ExpenseRecordEditor,
+} from '@/components/expense-record-editor';
+import { TimePickerModal } from '@/components/time-picker-modal';
 import { BrandColors } from '@/constants/theme';
-
-const CATEGORIES = ['식사', '카페', '쇼핑', '교통', '취미', '생활', '기타'] as const;
-const SATISFACTIONS = ['😫', '😕', '😐', '🙂', '😍'] as const;
-const RECORDS_STORAGE_KEY = '@my-money-app/expense-records';
-const DAILY_SATISFACTIONS_STORAGE_KEY = '@my-money-app/daily-satisfactions';
-
-type Category = (typeof CATEGORIES)[number];
-type Satisfaction = (typeof SATISFACTIONS)[number];
-type DailySatisfactions = Record<string, Satisfaction>;
-
-type ExpenseRecord = {
-  id: string;
-  amount: number;
-  category: Category;
-  satisfaction: Satisfaction;
-  memo: string;
-  createdAt: string;
-  localDate: string;
-  timeZone: string;
-};
-
-type StoredExpenseRecord = Omit<ExpenseRecord, 'localDate' | 'timeZone'> & {
-  localDate?: string;
-  timeZone?: string;
-};
-
-function getLocalDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-function getCurrentTimeZone() {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch (error) {
-    console.error('기기 시간대를 확인하지 못했습니다.', error);
-    return 'UTC';
-  }
-}
-
-function migrateExpenseRecord(record: StoredExpenseRecord): ExpenseRecord {
-  const createdDate = new Date(record.createdAt);
-  const safeCreatedDate = Number.isNaN(createdDate.getTime()) ? new Date() : createdDate;
-
-  return {
-    ...record,
-    localDate: record.localDate || getLocalDateKey(safeCreatedDate),
-    timeZone: record.timeZone || getCurrentTimeZone(),
-  };
-}
+import {
+  CATEGORIES,
+  Category,
+  createOccurredAtFromSelection,
+  DAILY_SATISFACTIONS_STORAGE_KEY,
+  DailySatisfactions,
+  ExpenseRecord,
+  formatRecordTime,
+  formatTimeSelection,
+  getCurrentTimeZone,
+  getLocalDateKey,
+  getTimeSelection,
+  migrateExpenseRecord,
+  RECORDS_STORAGE_KEY,
+  SATISFACTIONS,
+  Satisfaction,
+  StoredExpenseRecord,
+  TimeSelection,
+} from '@/lib/expense-record';
 
 export default function HomeScreen() {
   const [amount, setAmount] = useState('');
@@ -76,6 +49,12 @@ export default function HomeScreen() {
   const [isStorageReady, setIsStorageReady] = useState(false);
   const [dailySatisfactions, setDailySatisfactions] = useState<DailySatisfactions>({});
   const [isDailySatisfactionReady, setIsDailySatisfactionReady] = useState(false);
+  const [newRecordTime, setNewRecordTime] = useState<TimeSelection>(() =>
+    getTimeSelection(new Date())
+  );
+  const [hasCustomizedNewRecordTime, setHasCustomizedNewRecordTime] = useState(false);
+  const [isNewTimePickerVisible, setIsNewTimePickerVisible] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
   const nextRecordId = useRef(0);
 
   const today = useMemo(
@@ -89,98 +68,110 @@ export default function HomeScreen() {
   );
 
   const todayDateKey = getLocalDateKey(new Date());
-  const todayRecords = records.filter((record) => record.localDate === todayDateKey);
+  const todayRecords = records
+    .filter((record) => record.localDate === todayDateKey)
+    .sort((first, second) => {
+      return new Date(second.occurredAt).getTime() - new Date(first.occurredAt).getTime();
+    });
   const todaySatisfaction = dailySatisfactions[todayDateKey] ?? null;
   const canSubmit =
     isStorageReady && Number(amount) > 0 && category !== null && satisfaction !== null;
   const totalAmount = todayRecords.reduce((total, record) => total + record.amount, 0);
 
-  useEffect(() => {
-    let isMounted = true;
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      setIsStorageReady(false);
 
-    const loadRecords = async () => {
-      try {
-        const savedRecords = await AsyncStorage.getItem(RECORDS_STORAGE_KEY);
+      const loadRecords = async () => {
+        try {
+          const savedRecords = await AsyncStorage.getItem(RECORDS_STORAGE_KEY);
 
-        if (savedRecords !== null && isMounted) {
-          const parsedRecords: unknown = JSON.parse(savedRecords);
+          if (savedRecords !== null && isActive) {
+            const parsedRecords: unknown = JSON.parse(savedRecords);
 
-          if (Array.isArray(parsedRecords)) {
-            const storedRecords = parsedRecords as StoredExpenseRecord[];
-            const needsMigration = storedRecords.some(
-              (record) => !record.localDate || !record.timeZone
-            );
-            const migratedRecords = storedRecords.map(migrateExpenseRecord);
+            if (Array.isArray(parsedRecords)) {
+              const storedRecords = parsedRecords as StoredExpenseRecord[];
+              const needsMigration = storedRecords.some(
+                (record) => !record.occurredAt || !record.localDate || !record.timeZone
+              );
+              const migratedRecords = storedRecords.map(migrateExpenseRecord);
 
-            setRecords(migratedRecords);
+              setRecords(migratedRecords);
 
-            if (needsMigration) {
-              try {
-                await AsyncStorage.setItem(
-                  RECORDS_STORAGE_KEY,
-                  JSON.stringify(migratedRecords)
-                );
-              } catch (migrationError) {
-                console.error('보완된 소비 기록을 다시 저장하지 못했습니다.', migrationError);
+              if (needsMigration) {
+                try {
+                  await AsyncStorage.setItem(
+                    RECORDS_STORAGE_KEY,
+                    JSON.stringify(migratedRecords)
+                  );
+                } catch (migrationError) {
+                  console.error('보완된 소비 기록을 다시 저장하지 못했습니다.', migrationError);
+                }
               }
+            } else {
+              console.error('저장된 소비 기록이 배열 형태가 아닙니다.');
             }
-          } else {
-            console.error('저장된 소비 기록이 배열 형태가 아닙니다.');
+          }
+        } catch (error) {
+          console.error('소비 기록을 불러오지 못했습니다.', error);
+        } finally {
+          if (isActive) {
+            setIsStorageReady(true);
           }
         }
-      } catch (error) {
-        console.error('소비 기록을 불러오지 못했습니다.', error);
-      } finally {
-        if (isMounted) {
-          setIsStorageReady(true);
-        }
-      }
-    };
+      };
 
-    void loadRecords();
+      void loadRecords();
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
-  useEffect(() => {
-    let isMounted = true;
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      setIsDailySatisfactionReady(false);
 
-    const loadDailySatisfactions = async () => {
-      try {
-        const savedDailySatisfactions = await AsyncStorage.getItem(
-          DAILY_SATISFACTIONS_STORAGE_KEY
-        );
+      const loadDailySatisfactions = async () => {
+        try {
+          const savedDailySatisfactions = await AsyncStorage.getItem(
+            DAILY_SATISFACTIONS_STORAGE_KEY
+          );
 
-        if (savedDailySatisfactions !== null && isMounted) {
-          const parsedDailySatisfactions: unknown = JSON.parse(savedDailySatisfactions);
+          if (savedDailySatisfactions !== null && isActive) {
+            const parsedDailySatisfactions: unknown = JSON.parse(savedDailySatisfactions);
 
-          if (
-            typeof parsedDailySatisfactions === 'object' &&
-            parsedDailySatisfactions !== null &&
-            !Array.isArray(parsedDailySatisfactions)
-          ) {
-            setDailySatisfactions(parsedDailySatisfactions as DailySatisfactions);
-          } else {
-            console.error('저장된 하루 만족도가 날짜별 객체 형태가 아닙니다.');
+            if (
+              typeof parsedDailySatisfactions === 'object' &&
+              parsedDailySatisfactions !== null &&
+              !Array.isArray(parsedDailySatisfactions)
+            ) {
+              setDailySatisfactions(parsedDailySatisfactions as DailySatisfactions);
+            } else {
+              console.error('저장된 하루 만족도가 날짜별 객체 형태가 아닙니다.');
+            }
+          } else if (savedDailySatisfactions === null && isActive) {
+            setDailySatisfactions({});
+          }
+        } catch (error) {
+          console.error('하루 만족도를 불러오지 못했습니다.', error);
+        } finally {
+          if (isActive) {
+            setIsDailySatisfactionReady(true);
           }
         }
-      } catch (error) {
-        console.error('하루 만족도를 불러오지 못했습니다.', error);
-      } finally {
-        if (isMounted) {
-          setIsDailySatisfactionReady(true);
-        }
-      }
-    };
+      };
 
-    void loadDailySatisfactions();
+      void loadDailySatisfactions();
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
   const handleAmountChange = (value: string) => {
     setAmount(value.replace(/[^0-9]/g, ''));
@@ -193,6 +184,19 @@ export default function HomeScreen() {
 
     nextRecordId.current += 1;
     const recordedAt = new Date();
+    const localDate = getLocalDateKey(recordedAt);
+    const timeZone = getCurrentTimeZone();
+    const occurredAt = hasCustomizedNewRecordTime
+      ? createOccurredAtFromSelection(localDate, timeZone, newRecordTime)
+      : recordedAt.toISOString();
+
+    if (occurredAt === null) {
+      Alert.alert(
+        '시간을 저장할 수 없어요',
+        '현재 시간대에서 사용할 수 있는 시간을 다시 선택해 주세요.'
+      );
+      return;
+    }
 
     const newRecord: ExpenseRecord = {
       id: `${Date.now()}-${nextRecordId.current}`,
@@ -201,8 +205,9 @@ export default function HomeScreen() {
       satisfaction,
       memo: memo.trim(),
       createdAt: recordedAt.toISOString(),
-      localDate: getLocalDateKey(recordedAt),
-      timeZone: getCurrentTimeZone(),
+      occurredAt,
+      localDate,
+      timeZone,
     };
 
     const updatedRecords = [newRecord, ...records];
@@ -212,12 +217,78 @@ export default function HomeScreen() {
     setCategory(null);
     setSatisfaction(null);
     setMemo('');
+    setNewRecordTime(getTimeSelection(new Date()));
+    setHasCustomizedNewRecordTime(false);
 
     try {
       await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
     } catch (error) {
       console.error('소비 기록을 저장하지 못했습니다.', error);
     }
+  };
+
+  const saveEditedRecord = async (
+    record: ExpenseRecord,
+    values: ExpenseEditValues
+  ) => {
+    const occurredAt = createOccurredAtFromSelection(
+      record.localDate,
+      record.timeZone,
+      values.time
+    );
+
+    if (occurredAt === null) {
+      Alert.alert(
+        '시간을 저장할 수 없어요',
+        '기록 당시 시간대에서 사용할 수 있는 시간을 다시 선택해 주세요.'
+      );
+      return;
+    }
+
+    const updatedRecord: ExpenseRecord = {
+      ...record,
+      amount: values.amount,
+      category: values.category,
+      satisfaction: values.satisfaction,
+      memo: values.memo,
+      occurredAt,
+    };
+    const updatedRecords = records.map((item) =>
+      item.id === record.id ? updatedRecord : item
+    );
+
+    setRecords(updatedRecords);
+    setEditingRecord(null);
+
+    try {
+      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+    } catch (error) {
+      console.error('수정한 소비 기록을 저장하지 못했습니다.', error);
+    }
+  };
+
+  const deleteRecord = async (recordId: string) => {
+    const updatedRecords = records.filter((record) => record.id !== recordId);
+
+    setRecords(updatedRecords);
+    setEditingRecord(null);
+
+    try {
+      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+    } catch (error) {
+      console.error('소비 기록을 삭제한 결과를 저장하지 못했습니다.', error);
+    }
+  };
+
+  const confirmDeleteRecord = (record: ExpenseRecord) => {
+    Alert.alert('이 소비 기록을 삭제할까요?', '삭제한 기록은 되돌릴 수 없어요.', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: () => void deleteRecord(record.id),
+      },
+    ]);
   };
 
   const handleDailySatisfactionSelect = async (value: Satisfaction) => {
@@ -240,6 +311,14 @@ export default function HomeScreen() {
     } catch (error) {
       console.error('하루 만족도를 저장하지 못했습니다.', error);
     }
+  };
+
+  const openNewRecordTimePicker = () => {
+    if (!hasCustomizedNewRecordTime) {
+      setNewRecordTime(getTimeSelection(new Date()));
+    }
+
+    setIsNewTimePickerVisible(true);
   };
 
   return (
@@ -342,6 +421,23 @@ export default function HomeScreen() {
                   value={memo}
                 />
               </View>
+
+              <View style={styles.section}>
+                <Text style={styles.label}>소비 시간</Text>
+                <Pressable
+                  accessibilityLabel={`소비 시간 ${formatTimeSelection(newRecordTime)}`}
+                  accessibilityRole="button"
+                  onPress={openNewRecordTimePicker}
+                  style={({ pressed }) => [
+                    styles.timeSelector,
+                    pressed && styles.buttonPressed,
+                  ]}>
+                  <Text style={styles.timeSelectorText}>
+                    {formatTimeSelection(newRecordTime)}
+                  </Text>
+                  <Text style={styles.timeSelectorArrow}>›</Text>
+                </Pressable>
+              </View>
             </View>
 
             <Pressable
@@ -374,7 +470,15 @@ export default function HomeScreen() {
             ) : (
               <View style={styles.recordsList}>
                 {todayRecords.map((record) => (
-                  <View key={record.id} style={styles.recordItem}>
+                  <Pressable
+                    accessibilityLabel={`${record.category} ${record.amount.toLocaleString('ko-KR')}원 기록 수정`}
+                    accessibilityRole="button"
+                    key={record.id}
+                    onPress={() => setEditingRecord(record)}
+                    style={({ pressed }) => [
+                      styles.recordItem,
+                      pressed && styles.recordItemPressed,
+                    ]}>
                     <View style={styles.recordMainRow}>
                       <Text style={styles.recordCategory}>{record.category}</Text>
                       <View style={styles.recordAmountGroup}>
@@ -393,14 +497,9 @@ export default function HomeScreen() {
                       ) : (
                         <View style={styles.recordMemo} />
                       )}
-                      <Text style={styles.recordTime}>
-                        {new Intl.DateTimeFormat('ko-KR', {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        }).format(new Date(record.createdAt))}
-                      </Text>
+                      <Text style={styles.recordTime}>{formatRecordTime(record)}</Text>
                     </View>
-                  </View>
+                  </Pressable>
                 ))}
               </View>
             )}
@@ -434,6 +533,23 @@ export default function HomeScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <TimePickerModal
+        onChange={(value) => {
+          setNewRecordTime(value);
+          setHasCustomizedNewRecordTime(true);
+        }}
+        onClose={() => setIsNewTimePickerVisible(false)}
+        value={newRecordTime}
+        visible={isNewTimePickerVisible}
+      />
+
+      <ExpenseRecordEditor
+        onClose={() => setEditingRecord(null)}
+        onDelete={confirmDeleteRecord}
+        onSave={saveEditedRecord}
+        record={editingRecord}
+      />
     </SafeAreaView>
   );
 }
@@ -566,6 +682,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     paddingVertical: 10,
   },
+  timeSelector: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    height: 44,
+    justifyContent: 'space-between',
+    paddingHorizontal: 13,
+  },
+  timeSelectorText: {
+    color: '#343832',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  timeSelectorArrow: {
+    color: '#8A9187',
+    fontSize: 24,
+    lineHeight: 26,
+  },
   submitButton: {
     alignItems: 'center',
     backgroundColor: BrandColors.primary,
@@ -630,6 +767,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  recordItemPressed: {
+    backgroundColor: '#F4F7F0',
+    borderColor: BrandColors.primary,
   },
   recordMainRow: {
     alignItems: 'center',
