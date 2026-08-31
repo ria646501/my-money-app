@@ -1,6 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,11 +19,22 @@ const SATISFACTIONS = ['😫', '😕', '😐', '🙂', '😍'] as const;
 type Category = (typeof CATEGORIES)[number];
 type Satisfaction = (typeof SATISFACTIONS)[number];
 
+type ExpenseRecord = {
+  id: string;
+  amount: number;
+  category: Category;
+  satisfaction: Satisfaction;
+  memo: string;
+  createdAt: string;
+};
+
 export default function HomeScreen() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(null);
   const [memo, setMemo] = useState('');
+  const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const nextRecordId = useRef(0);
 
   const today = useMemo(
     () =>
@@ -37,21 +47,33 @@ export default function HomeScreen() {
   );
 
   const canSubmit = Number(amount) > 0 && category !== null && satisfaction !== null;
+  const totalAmount = records.reduce((total, record) => total + record.amount, 0);
 
   const handleAmountChange = (value: string) => {
     setAmount(value.replace(/[^0-9]/g, ''));
   };
 
   const handleSubmit = () => {
-    if (!canSubmit) {
-      Alert.alert('조금만 더 알려주세요', '금액, 카테고리, 만족도를 모두 선택해 주세요.');
+    if (Number(amount) <= 0 || category === null || satisfaction === null) {
       return;
     }
 
-    Alert.alert(
-      '입력 내용이 준비됐어요',
-      '이번 단계에서는 화면 동작만 확인합니다. 실제 저장은 다음 단계에서 연결할게요.'
-    );
+    nextRecordId.current += 1;
+
+    const newRecord: ExpenseRecord = {
+      id: `${Date.now()}-${nextRecordId.current}`,
+      amount: Number(amount),
+      category,
+      satisfaction,
+      memo: memo.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    setRecords((currentRecords) => [newRecord, ...currentRecords]);
+    setAmount('');
+    setCategory(null);
+    setSatisfaction(null);
+    setMemo('');
   };
 
   return (
@@ -171,6 +193,51 @@ export default function HomeScreen() {
                 기록하기
               </Text>
             </Pressable>
+          </View>
+
+          <View style={styles.recordsSection}>
+            <View style={styles.recordsHeader}>
+              <Text style={styles.recordsTitle}>오늘 기록</Text>
+              <Text style={styles.totalAmount}>총 {totalAmount.toLocaleString('ko-KR')}원</Text>
+            </View>
+
+            {records.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>아직 기록한 소비가 없어요.</Text>
+              </View>
+            ) : (
+              <View style={styles.recordsList}>
+                {records.map((record) => (
+                  <View key={record.id} style={styles.recordItem}>
+                    <View style={styles.recordMainRow}>
+                      <Text style={styles.recordCategory}>{record.category}</Text>
+                      <View style={styles.recordAmountGroup}>
+                        <Text style={styles.recordAmount}>
+                          {record.amount.toLocaleString('ko-KR')}원
+                        </Text>
+                        <Text style={styles.recordSatisfaction}>{record.satisfaction}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.recordDetailRow}>
+                      {record.memo ? (
+                        <Text numberOfLines={1} style={styles.recordMemo}>
+                          {record.memo}
+                        </Text>
+                      ) : (
+                        <View style={styles.recordMemo} />
+                      )}
+                      <Text style={styles.recordTime}>
+                        {new Intl.DateTimeFormat('ko-KR', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        }).format(new Date(record.createdAt))}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -328,6 +395,92 @@ const styles = StyleSheet.create({
   },
   submitButtonTextDisabled: {
     color: '#9AA097',
+  },
+  recordsSection: {
+    marginTop: 34,
+  },
+  recordsHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  recordsTitle: {
+    color: '#20231D',
+    fontSize: 19,
+    fontWeight: '800',
+  },
+  totalAmount: {
+    color: '#555B52',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  emptyState: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 22,
+  },
+  emptyStateText: {
+    color: '#8A9187',
+    fontSize: 14,
+  },
+  recordsList: {
+    gap: 10,
+  },
+  recordItem: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  recordMainRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  recordCategory: {
+    backgroundColor: BrandColors.primarySoft,
+    borderRadius: 8,
+    color: BrandColors.onPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  recordAmountGroup: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  recordAmount: {
+    color: '#20231D',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  recordSatisfaction: {
+    fontSize: 22,
+  },
+  recordDetailRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  recordMemo: {
+    color: '#656C62',
+    flex: 1,
+    fontSize: 13,
+    marginRight: 12,
+  },
+  recordTime: {
+    color: '#92988F',
+    fontSize: 12,
   },
   buttonPressed: {
     opacity: 0.75,
