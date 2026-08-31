@@ -17,9 +17,11 @@ import { BrandColors } from '@/constants/theme';
 const CATEGORIES = ['식사', '카페', '쇼핑', '교통', '취미', '생활', '기타'] as const;
 const SATISFACTIONS = ['😫', '😕', '😐', '🙂', '😍'] as const;
 const RECORDS_STORAGE_KEY = '@my-money-app/expense-records';
+const DAILY_SATISFACTIONS_STORAGE_KEY = '@my-money-app/daily-satisfactions';
 
 type Category = (typeof CATEGORIES)[number];
 type Satisfaction = (typeof SATISFACTIONS)[number];
+type DailySatisfactions = Record<string, Satisfaction>;
 
 type ExpenseRecord = {
   id: string;
@@ -41,6 +43,14 @@ function isToday(createdAt: string) {
   );
 }
 
+function getLocalDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
 export default function HomeScreen() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
@@ -48,6 +58,8 @@ export default function HomeScreen() {
   const [memo, setMemo] = useState('');
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [isStorageReady, setIsStorageReady] = useState(false);
+  const [dailySatisfactions, setDailySatisfactions] = useState<DailySatisfactions>({});
+  const [isDailySatisfactionReady, setIsDailySatisfactionReady] = useState(false);
   const nextRecordId = useRef(0);
 
   const today = useMemo(
@@ -61,6 +73,8 @@ export default function HomeScreen() {
   );
 
   const todayRecords = records.filter((record) => isToday(record.createdAt));
+  const todayDateKey = getLocalDateKey(new Date());
+  const todaySatisfaction = dailySatisfactions[todayDateKey] ?? null;
   const canSubmit =
     isStorageReady && Number(amount) > 0 && category !== null && satisfaction !== null;
   const totalAmount = todayRecords.reduce((total, record) => total + record.amount, 0);
@@ -91,6 +105,44 @@ export default function HomeScreen() {
     };
 
     void loadRecords();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDailySatisfactions = async () => {
+      try {
+        const savedDailySatisfactions = await AsyncStorage.getItem(
+          DAILY_SATISFACTIONS_STORAGE_KEY
+        );
+
+        if (savedDailySatisfactions !== null && isMounted) {
+          const parsedDailySatisfactions: unknown = JSON.parse(savedDailySatisfactions);
+
+          if (
+            typeof parsedDailySatisfactions === 'object' &&
+            parsedDailySatisfactions !== null &&
+            !Array.isArray(parsedDailySatisfactions)
+          ) {
+            setDailySatisfactions(parsedDailySatisfactions as DailySatisfactions);
+          } else {
+            console.error('저장된 하루 만족도가 날짜별 객체 형태가 아닙니다.');
+          }
+        }
+      } catch (error) {
+        console.error('하루 만족도를 불러오지 못했습니다.', error);
+      } finally {
+        if (isMounted) {
+          setIsDailySatisfactionReady(true);
+        }
+      }
+    };
+
+    void loadDailySatisfactions();
 
     return () => {
       isMounted = false;
@@ -129,6 +181,28 @@ export default function HomeScreen() {
       await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
     } catch (error) {
       console.error('소비 기록을 저장하지 못했습니다.', error);
+    }
+  };
+
+  const handleDailySatisfactionSelect = async (value: Satisfaction) => {
+    if (!isDailySatisfactionReady) {
+      return;
+    }
+
+    const updatedDailySatisfactions = {
+      ...dailySatisfactions,
+      [todayDateKey]: value,
+    };
+
+    setDailySatisfactions(updatedDailySatisfactions);
+
+    try {
+      await AsyncStorage.setItem(
+        DAILY_SATISFACTIONS_STORAGE_KEY,
+        JSON.stringify(updatedDailySatisfactions)
+      );
+    } catch (error) {
+      console.error('하루 만족도를 저장하지 못했습니다.', error);
     }
   };
 
@@ -294,6 +368,33 @@ export default function HomeScreen() {
                 ))}
               </View>
             )}
+
+            {todayRecords.length > 0 && isDailySatisfactionReady ? (
+              <View style={styles.dailyReview}>
+                <Text style={styles.dailyReviewTitle}>오늘의 소비는 어땠어?</Text>
+                <View style={styles.dailySatisfactionRow}>
+                  {SATISFACTIONS.map((item) => {
+                    const isSelected = todaySatisfaction === item;
+
+                    return (
+                      <Pressable
+                        accessibilityLabel={`하루 전체 소비 만족도 ${item}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isSelected }}
+                        key={item}
+                        onPress={() => void handleDailySatisfactionSelect(item)}
+                        style={({ pressed }) => [
+                          styles.dailySatisfactionButton,
+                          isSelected && styles.dailySatisfactionButtonSelected,
+                          pressed && styles.buttonPressed,
+                        ]}>
+                        <Text style={styles.dailySatisfactionEmoji}>{item}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -537,6 +638,42 @@ const styles = StyleSheet.create({
   recordTime: {
     color: '#92988F',
     fontSize: 12,
+  },
+  dailyReview: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3E7DF',
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 18,
+    padding: 14,
+  },
+  dailyReviewTitle: {
+    color: '#343832',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  dailySatisfactionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dailySatisfactionButton: {
+    alignItems: 'center',
+    backgroundColor: '#FAFBF8',
+    borderColor: '#E3E7DF',
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    height: 48,
+    justifyContent: 'center',
+  },
+  dailySatisfactionButtonSelected: {
+    backgroundColor: BrandColors.primarySoft,
+    borderColor: BrandColors.primary,
+    borderWidth: 2,
+  },
+  dailySatisfactionEmoji: {
+    fontSize: 25,
   },
   buttonPressed: {
     opacity: 0.75,
