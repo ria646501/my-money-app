@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +16,7 @@ import { BrandColors } from '@/constants/theme';
 
 const CATEGORIES = ['식사', '카페', '쇼핑', '교통', '취미', '생활', '기타'] as const;
 const SATISFACTIONS = ['😫', '😕', '😐', '🙂', '😍'] as const;
+const RECORDS_STORAGE_KEY = '@my-money-app/expense-records';
 
 type Category = (typeof CATEGORIES)[number];
 type Satisfaction = (typeof SATISFACTIONS)[number];
@@ -28,12 +30,24 @@ type ExpenseRecord = {
   createdAt: string;
 };
 
+function isToday(createdAt: string) {
+  const recordDate = new Date(createdAt);
+  const today = new Date();
+
+  return (
+    recordDate.getFullYear() === today.getFullYear() &&
+    recordDate.getMonth() === today.getMonth() &&
+    recordDate.getDate() === today.getDate()
+  );
+}
+
 export default function HomeScreen() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(null);
   const [memo, setMemo] = useState('');
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const [isStorageReady, setIsStorageReady] = useState(false);
   const nextRecordId = useRef(0);
 
   const today = useMemo(
@@ -46,14 +60,48 @@ export default function HomeScreen() {
     []
   );
 
-  const canSubmit = Number(amount) > 0 && category !== null && satisfaction !== null;
-  const totalAmount = records.reduce((total, record) => total + record.amount, 0);
+  const todayRecords = records.filter((record) => isToday(record.createdAt));
+  const canSubmit =
+    isStorageReady && Number(amount) > 0 && category !== null && satisfaction !== null;
+  const totalAmount = todayRecords.reduce((total, record) => total + record.amount, 0);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadRecords = async () => {
+      try {
+        const savedRecords = await AsyncStorage.getItem(RECORDS_STORAGE_KEY);
+
+        if (savedRecords !== null && isMounted) {
+          const parsedRecords: unknown = JSON.parse(savedRecords);
+
+          if (Array.isArray(parsedRecords)) {
+            setRecords(parsedRecords as ExpenseRecord[]);
+          } else {
+            console.error('저장된 소비 기록이 배열 형태가 아닙니다.');
+          }
+        }
+      } catch (error) {
+        console.error('소비 기록을 불러오지 못했습니다.', error);
+      } finally {
+        if (isMounted) {
+          setIsStorageReady(true);
+        }
+      }
+    };
+
+    void loadRecords();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleAmountChange = (value: string) => {
     setAmount(value.replace(/[^0-9]/g, ''));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (Number(amount) <= 0 || category === null || satisfaction === null) {
       return;
     }
@@ -69,11 +117,19 @@ export default function HomeScreen() {
       createdAt: new Date().toISOString(),
     };
 
-    setRecords((currentRecords) => [newRecord, ...currentRecords]);
+    const updatedRecords = [newRecord, ...records];
+
+    setRecords(updatedRecords);
     setAmount('');
     setCategory(null);
     setSatisfaction(null);
     setMemo('');
+
+    try {
+      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+    } catch (error) {
+      console.error('소비 기록을 저장하지 못했습니다.', error);
+    }
   };
 
   return (
@@ -201,13 +257,13 @@ export default function HomeScreen() {
               <Text style={styles.totalAmount}>총 {totalAmount.toLocaleString('ko-KR')}원</Text>
             </View>
 
-            {records.length === 0 ? (
+            {todayRecords.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>아직 기록한 소비가 없어요.</Text>
               </View>
             ) : (
               <View style={styles.recordsList}>
-                {records.map((record) => (
+                {todayRecords.map((record) => (
                   <View key={record.id} style={styles.recordItem}>
                     <View style={styles.recordMainRow}>
                       <Text style={styles.recordCategory}>{record.category}</Text>
