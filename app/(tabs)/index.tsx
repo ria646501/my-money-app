@@ -30,18 +30,14 @@ type ExpenseRecord = {
   satisfaction: Satisfaction;
   memo: string;
   createdAt: string;
+  localDate: string;
+  timeZone: string;
 };
 
-function isToday(createdAt: string) {
-  const recordDate = new Date(createdAt);
-  const today = new Date();
-
-  return (
-    recordDate.getFullYear() === today.getFullYear() &&
-    recordDate.getMonth() === today.getMonth() &&
-    recordDate.getDate() === today.getDate()
-  );
-}
+type StoredExpenseRecord = Omit<ExpenseRecord, 'localDate' | 'timeZone'> & {
+  localDate?: string;
+  timeZone?: string;
+};
 
 function getLocalDateKey(date: Date) {
   const year = date.getFullYear();
@@ -49,6 +45,26 @@ function getLocalDateKey(date: Date) {
   const day = String(date.getDate()).padStart(2, '0');
 
   return `${year}-${month}-${day}`;
+}
+
+function getCurrentTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch (error) {
+    console.error('기기 시간대를 확인하지 못했습니다.', error);
+    return 'UTC';
+  }
+}
+
+function migrateExpenseRecord(record: StoredExpenseRecord): ExpenseRecord {
+  const createdDate = new Date(record.createdAt);
+  const safeCreatedDate = Number.isNaN(createdDate.getTime()) ? new Date() : createdDate;
+
+  return {
+    ...record,
+    localDate: record.localDate || getLocalDateKey(safeCreatedDate),
+    timeZone: record.timeZone || getCurrentTimeZone(),
+  };
 }
 
 export default function HomeScreen() {
@@ -72,8 +88,8 @@ export default function HomeScreen() {
     []
   );
 
-  const todayRecords = records.filter((record) => isToday(record.createdAt));
   const todayDateKey = getLocalDateKey(new Date());
+  const todayRecords = records.filter((record) => record.localDate === todayDateKey);
   const todaySatisfaction = dailySatisfactions[todayDateKey] ?? null;
   const canSubmit =
     isStorageReady && Number(amount) > 0 && category !== null && satisfaction !== null;
@@ -90,7 +106,24 @@ export default function HomeScreen() {
           const parsedRecords: unknown = JSON.parse(savedRecords);
 
           if (Array.isArray(parsedRecords)) {
-            setRecords(parsedRecords as ExpenseRecord[]);
+            const storedRecords = parsedRecords as StoredExpenseRecord[];
+            const needsMigration = storedRecords.some(
+              (record) => !record.localDate || !record.timeZone
+            );
+            const migratedRecords = storedRecords.map(migrateExpenseRecord);
+
+            setRecords(migratedRecords);
+
+            if (needsMigration) {
+              try {
+                await AsyncStorage.setItem(
+                  RECORDS_STORAGE_KEY,
+                  JSON.stringify(migratedRecords)
+                );
+              } catch (migrationError) {
+                console.error('보완된 소비 기록을 다시 저장하지 못했습니다.', migrationError);
+              }
+            }
           } else {
             console.error('저장된 소비 기록이 배열 형태가 아닙니다.');
           }
@@ -159,6 +192,7 @@ export default function HomeScreen() {
     }
 
     nextRecordId.current += 1;
+    const recordedAt = new Date();
 
     const newRecord: ExpenseRecord = {
       id: `${Date.now()}-${nextRecordId.current}`,
@@ -166,7 +200,9 @@ export default function HomeScreen() {
       category,
       satisfaction,
       memo: memo.trim(),
-      createdAt: new Date().toISOString(),
+      createdAt: recordedAt.toISOString(),
+      localDate: getLocalDateKey(recordedAt),
+      timeZone: getCurrentTimeZone(),
     };
 
     const updatedRecords = [newRecord, ...records];
