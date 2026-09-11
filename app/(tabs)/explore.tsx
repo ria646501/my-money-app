@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -25,9 +25,11 @@ import {
   DailySatisfactions,
   ExpenseRecord,
   formatRecordTime,
+  getCurrentTimeZone,
   getDateKey,
   getLocalDateKey,
   getRecordTimeSelection,
+  getTimeSelection,
   migrateExpenseRecord,
   RECORDS_STORAGE_KEY,
   SATISFACTIONS,
@@ -44,6 +46,7 @@ function formatSelectedDate(dateKey: string) {
 }
 
 export default function CalendarScreen() {
+  const editScrollRef = useRef<ScrollView>(null);
   const [visibleMonth, setVisibleMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -51,6 +54,7 @@ export default function CalendarScreen() {
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [dailySatisfactions, setDailySatisfactions] = useState<DailySatisfactions>({});
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  const [addingDateKey, setAddingDateKey] = useState<string | null>(null);
   const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editCategory, setEditCategory] = useState<Category | null>(null);
@@ -187,12 +191,27 @@ export default function CalendarScreen() {
   const canEditDailySatisfaction =
     selectedRecords.length > 0 || selectedDailySatisfaction !== null;
   const canSaveEdit =
-    editingRecord !== null &&
+    (editingRecord !== null || addingDateKey !== null) &&
     Number(editAmount) > 0 &&
     editCategory !== null &&
     editSatisfaction !== null;
 
+  const openAddModal = () => {
+    if (selectedDateKey === null || selectedDateKey > todayDateKey) {
+      return;
+    }
+
+    setEditingRecord(null);
+    setAddingDateKey(selectedDateKey);
+    setEditAmount('');
+    setEditCategory(null);
+    setEditSatisfaction(null);
+    setEditMemo('');
+    setEditTime(getTimeSelection(new Date()));
+  };
+
   const openEditModal = (record: ExpenseRecord) => {
+    setAddingDateKey(null);
     setEditingRecord(record);
     setEditAmount(String(record.amount));
     setEditCategory(record.category);
@@ -203,15 +222,63 @@ export default function CalendarScreen() {
 
   const closeEditModal = () => {
     setEditingRecord(null);
+    setAddingDateKey(null);
   };
 
   const saveEditedRecord = async () => {
     if (
       !canSaveEdit ||
-      editingRecord === null ||
       editCategory === null ||
       editSatisfaction === null
     ) {
+      return;
+    }
+
+    if (addingDateKey !== null) {
+      const recordedAt = new Date();
+
+      if (addingDateKey > getLocalDateKey(recordedAt)) {
+        Alert.alert('미래 날짜에는 기록할 수 없어요');
+        return;
+      }
+
+      const timeZone = getCurrentTimeZone();
+      const occurredAt = createOccurredAtFromSelection(addingDateKey, timeZone, editTime);
+
+      if (occurredAt === null) {
+        Alert.alert(
+          '시간을 저장할 수 없어요',
+          '현재 시간대에서 사용할 수 있는 시간을 선택해 주세요.'
+        );
+        return;
+      }
+
+      const newRecord: ExpenseRecord = {
+        id: `${recordedAt.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+        amount: Number(editAmount),
+        category: editCategory,
+        satisfaction: editSatisfaction,
+        memo: editMemo.trim(),
+        createdAt: recordedAt.toISOString(),
+        occurredAt,
+        localDate: addingDateKey,
+        timeZone,
+      };
+      const updatedRecords = [newRecord, ...records];
+
+      try {
+        await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+        setRecords(updatedRecords);
+        setAddingDateKey(null);
+      } catch (error) {
+        console.error('선택한 날짜의 소비 기록을 저장하지 못했습니다.', error);
+        Alert.alert('기록을 저장하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      }
+
+      return;
+    }
+
+    if (editingRecord === null) {
       return;
     }
 
@@ -449,7 +516,21 @@ export default function CalendarScreen() {
               </View>
             </View>
 
-            <Text style={styles.detailListTitle}>소비 기록</Text>
+            <View style={styles.detailListHeader}>
+              <Text style={styles.detailListTitle}>소비 기록</Text>
+              {selectedDateKey <= todayDateKey ? (
+                <Pressable
+                  accessibilityLabel={`${formatSelectedDate(selectedDateKey)} 소비 기록 추가`}
+                  accessibilityRole="button"
+                  onPress={openAddModal}
+                  style={({ pressed }) => [
+                    styles.addRecordButton,
+                    pressed && styles.buttonPressed,
+                  ]}>
+                  <Text style={styles.addRecordButtonText}>+ 소비 기록 추가</Text>
+                </Pressable>
+              ) : null}
+            </View>
 
             {selectedRecords.length === 0 ? (
               <View style={styles.detailEmptyState}>
@@ -499,7 +580,7 @@ export default function CalendarScreen() {
         animationType="slide"
         onRequestClose={closeEditModal}
         transparent
-        visible={editingRecord !== null}>
+        visible={editingRecord !== null || addingDateKey !== null}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalKeyboardView}>
@@ -508,11 +589,18 @@ export default function CalendarScreen() {
               <ScrollView
                 contentContainerStyle={styles.modalContent}
                 keyboardShouldPersistTaps="handled"
+                ref={editScrollRef}
                 showsVerticalScrollIndicator={false}>
                 <View style={styles.modalHeader}>
                   <View>
-                    <Text style={styles.modalTitle}>소비 기록 수정</Text>
-                    {editingRecord ? (
+                    <Text style={styles.modalTitle}>
+                      {addingDateKey !== null ? '소비 기록 추가' : '소비 기록 수정'}
+                    </Text>
+                    {addingDateKey !== null ? (
+                      <Text style={styles.modalDate}>
+                        {formatSelectedDate(addingDateKey)} · 현재 시간대
+                      </Text>
+                    ) : editingRecord ? (
                       <Text style={styles.modalDate}>
                         {formatSelectedDate(editingRecord.localDate)} · {editingRecord.timeZone}
                       </Text>
@@ -616,19 +704,27 @@ export default function CalendarScreen() {
 
                 <View style={styles.editSection}>
                   <Text style={styles.editLabel}>소비 시간</Text>
-                  <TimeWheelPicker onChange={setEditTime} value={editTime} />
+                  <TimeWheelPicker
+                    onChange={setEditTime}
+                    onGestureActiveChange={(isActive) => {
+                      editScrollRef.current?.setNativeProps({ scrollEnabled: !isActive });
+                    }}
+                    value={editTime}
+                  />
                 </View>
 
                 <View style={styles.modalActions}>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={confirmDeleteRecord}
-                    style={({ pressed }) => [
-                      styles.deleteButton,
-                      pressed && styles.buttonPressed,
-                    ]}>
-                    <Text style={styles.deleteButtonText}>삭제</Text>
-                  </Pressable>
+                  {editingRecord !== null ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={confirmDeleteRecord}
+                      style={({ pressed }) => [
+                        styles.deleteButton,
+                        pressed && styles.buttonPressed,
+                      ]}>
+                      <Text style={styles.deleteButtonText}>삭제</Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     accessibilityRole="button"
                     accessibilityState={{ disabled: !canSaveEdit }}
@@ -644,7 +740,7 @@ export default function CalendarScreen() {
                         styles.saveButtonText,
                         !canSaveEdit && styles.saveButtonTextDisabled,
                       ]}>
-                      저장
+                      {addingDateKey !== null ? '기록하기' : '저장'}
                     </Text>
                   </Pressable>
                 </View>
@@ -842,11 +938,31 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     maxWidth: '100%',
   },
+  detailListHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 11,
+  },
   detailListTitle: {
     color: '#343832',
     fontSize: 17,
     fontWeight: '800',
-    marginBottom: 11,
+  },
+  addRecordButton: {
+    alignItems: 'center',
+    backgroundColor: BrandColors.primarySoft,
+    borderColor: BrandColors.primary,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 36,
+    paddingHorizontal: 11,
+  },
+  addRecordButtonText: {
+    color: BrandColors.onPrimary,
+    fontSize: 13,
+    fontWeight: '800',
   },
   detailEmptyState: {
     alignItems: 'center',

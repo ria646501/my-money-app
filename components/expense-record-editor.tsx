@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -49,6 +49,7 @@ export function ExpenseRecordEditor({
   onDelete,
   onSave,
 }: ExpenseRecordEditorProps) {
+  const scrollRef = useRef<ScrollView>(null);
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(null);
@@ -96,6 +97,7 @@ export function ExpenseRecordEditor({
               contentContainerStyle={styles.content}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
+              ref={scrollRef}
               showsVerticalScrollIndicator={false}>
               <View style={styles.header}>
                 <View>
@@ -201,7 +203,13 @@ export function ExpenseRecordEditor({
 
               <View style={styles.section}>
                 <Text style={styles.label}>소비 시간</Text>
-                <TimeWheelPicker onChange={setTime} value={time} />
+                <TimeWheelPicker
+                  onChange={setTime}
+                  onGestureActiveChange={(isActive) => {
+                    scrollRef.current?.setNativeProps({ scrollEnabled: !isActive });
+                  }}
+                  value={time}
+                />
               </View>
 
               <View style={styles.actions}>

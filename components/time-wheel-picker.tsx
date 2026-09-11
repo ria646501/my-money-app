@@ -2,6 +2,7 @@ import { forwardRef, memo, useEffect, useMemo, useRef } from 'react';
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,35 +25,47 @@ const PERIODS: Period[] = ['AM', 'PM'];
 
 type WheelColumnProps<T extends string | number> = {
   accessibilityLabel: string;
+  columnId: string;
   items: readonly T[];
   selectedValue: T;
   formatValue: (value: T) => string;
   onChange: (value: T) => void;
+  onInteractionStart: (columnId: string, stop: () => void) => void;
   width: number;
   cyclic?: boolean;
 };
 
 const WheelItem = memo(
-  forwardRef<Text, { isSelected: boolean; text: string }>(function WheelItem(
-    { isSelected, text },
+  forwardRef<
+    Text,
+    { accessibilityLabel: string; isSelected: boolean; onPress: () => void; text: string }
+  >(function WheelItem(
+    { accessibilityLabel, isSelected, onPress, text },
     ref
   ) {
     return (
-      <View style={styles.item}>
+      <Pressable
+        accessibilityLabel={accessibilityLabel}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isSelected }}
+        onPress={onPress}
+        style={styles.item}>
         <Text ref={ref} style={isSelected ? styles.itemTextSelected : styles.itemText}>
           {text}
         </Text>
-      </View>
+      </Pressable>
     );
   })
 );
 
 function WheelColumn<T extends string | number>({
   accessibilityLabel,
+  columnId,
   items,
   selectedValue,
   formatValue,
   onChange,
+  onInteractionStart,
   width,
   cyclic = false,
 }: WheelColumnProps<T>) {
@@ -61,6 +74,8 @@ function WheelColumn<T extends string | number>({
   const hasInitializedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const isMomentumScrollingRef = useRef(false);
+  const ignoreNextMomentumEndRef = useRef(false);
+  const tappedIndexRef = useRef<number | null>(null);
   const itemRefs = useRef<(Text | null)[]>([]);
   const lastOffsetRef = useRef(0);
   const lastCommittedValueRef = useRef(selectedValue);
@@ -137,6 +152,15 @@ function WheelColumn<T extends string | number>({
       Math.min(displayItems.length - 1, Math.round(offsetY / ITEM_HEIGHT))
     );
 
+  const commitValue = (nextValue: T) => {
+    if (nextValue === lastCommittedValueRef.current) {
+      return;
+    }
+
+    lastCommittedValueRef.current = nextValue;
+    onChange(nextValue);
+  };
+
   const scheduleFinalizeAfterScrollSettles = () => {
     cancelDragEndTimer();
 
@@ -185,13 +209,49 @@ function WheelColumn<T extends string | number>({
       scrollRef.current?.scrollTo({ y: nextOffset, animated: false });
     }
 
-    if (nextValue !== selectedValue) {
-      lastCommittedValueRef.current = nextValue;
-      onChange(nextValue);
+    commitValue(nextValue);
+  };
+
+  const stopOngoingInteraction = () => {
+    const shouldStop =
+      isDraggingRef.current ||
+      isMomentumScrollingRef.current ||
+      tappedIndexRef.current !== null ||
+      dragEndTimerRef.current !== null;
+
+    if (!shouldStop) {
+      return;
     }
+
+    ignoreNextMomentumEndRef.current =
+      isMomentumScrollingRef.current || tappedIndexRef.current !== null;
+    isDraggingRef.current = false;
+    isMomentumScrollingRef.current = false;
+    tappedIndexRef.current = null;
+    cancelDragEndTimer();
+    finalizeSelection(lastOffsetRef.current);
+  };
+
+  const handleTouchStart = () => {
+    onInteractionStart(columnId, stopOngoingInteraction);
+  };
+
+  const handleItemPress = (index: number) => {
+    const nextValue = displayItems[index];
+
+    if (nextValue === undefined) {
+      return;
+    }
+
+    cancelDragEndTimer();
+    tappedIndexRef.current = index;
+    commitValue(nextValue);
+    scrollRef.current?.scrollTo({ y: index * ITEM_HEIGHT, animated: true });
   };
 
   const handleDragBegin = () => {
+    ignoreNextMomentumEndRef.current = false;
+    tappedIndexRef.current = null;
     isDraggingRef.current = true;
     isMomentumScrollingRef.current = false;
     cancelDragEndTimer();
@@ -206,7 +266,18 @@ function WheelColumn<T extends string | number>({
   const handleMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     isMomentumScrollingRef.current = false;
     cancelDragEndTimer();
-    finalizeSelection(event.nativeEvent.contentOffset.y);
+
+    if (ignoreNextMomentumEndRef.current) {
+      ignoreNextMomentumEndRef.current = false;
+      tappedIndexRef.current = null;
+      return;
+    }
+
+    const tappedIndex = tappedIndexRef.current;
+    tappedIndexRef.current = null;
+    finalizeSelection(
+      tappedIndex === null ? event.nativeEvent.contentOffset.y : tappedIndex * ITEM_HEIGHT
+    );
   };
 
   const handleDragEnd = () => {
@@ -225,9 +296,12 @@ function WheelColumn<T extends string | number>({
         nestedScrollEnabled
         onMomentumScrollBegin={handleMomentumBegin}
         onMomentumScrollEnd={handleMomentumEnd}
+        onMoveShouldSetResponderCapture={() => true}
+        onResponderTerminationRequest={() => false}
         onScroll={handleScroll}
         onScrollBeginDrag={handleDragBegin}
         onScrollEndDrag={handleDragEnd}
+        onTouchStart={handleTouchStart}
         ref={scrollRef}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
@@ -235,15 +309,18 @@ function WheelColumn<T extends string | number>({
         snapToInterval={ITEM_HEIGHT}>
         {displayItems.map((item, index) => {
           const isSelected = index === middleSelectedIndex;
+          const text = formatValue(item);
 
           return (
             <WheelItem
+              accessibilityLabel={`${accessibilityLabel} ${text}`}
               isSelected={isSelected}
               key={`${String(item)}-${index}`}
+              onPress={() => handleItemPress(index)}
               ref={(node) => {
                 itemRefs.current[index] = node;
               }}
-              text={formatValue(item)}
+              text={text}
             />
           );
         })}
@@ -255,17 +332,66 @@ function WheelColumn<T extends string | number>({
 type TimeWheelPickerProps = {
   value: TimeSelection;
   onChange: (value: TimeSelection) => void;
+  onGestureActiveChange?: (isActive: boolean) => void;
 };
 
-export function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
+export function TimeWheelPicker({
+  value,
+  onChange,
+  onGestureActiveChange,
+}: TimeWheelPickerProps) {
+  const activeColumnRef = useRef<{ columnId: string; stop: () => void } | null>(null);
+  const isGestureActiveRef = useRef(false);
+  const latestValueRef = useRef(value);
+
+  useEffect(() => {
+    latestValueRef.current = value;
+  }, [value]);
+
+  const handleInteractionStart = (columnId: string, stop: () => void) => {
+    const activeColumn = activeColumnRef.current;
+
+    if (activeColumn !== null && activeColumn.columnId !== columnId) {
+      activeColumn.stop();
+    }
+
+    activeColumnRef.current = { columnId, stop };
+  };
+
+  const updateValue = (nextValue: Partial<TimeSelection>) => {
+    const updatedValue = { ...latestValueRef.current, ...nextValue };
+    latestValueRef.current = updatedValue;
+    onChange(updatedValue);
+  };
+
+  const handlePickerTouchStart = () => {
+    if (!isGestureActiveRef.current) {
+      isGestureActiveRef.current = true;
+      onGestureActiveChange?.(true);
+    }
+  };
+
+  const handlePickerTouchEnd = () => {
+    if (isGestureActiveRef.current) {
+      isGestureActiveRef.current = false;
+      onGestureActiveChange?.(false);
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <View
+      onTouchCancel={handlePickerTouchEnd}
+      onTouchEnd={handlePickerTouchEnd}
+      onTouchStart={handlePickerTouchStart}
+      style={styles.container}>
       <View pointerEvents="none" style={styles.selectionHighlight} />
       <WheelColumn
         accessibilityLabel="소비 시간 시 선택"
+        columnId="hour"
         formatValue={(hour) => String(hour).padStart(2, '0')}
         items={HOURS}
-        onChange={(hour) => onChange({ ...value, hour })}
+        onChange={(hour) => updateValue({ hour })}
+        onInteractionStart={handleInteractionStart}
         selectedValue={value.hour}
         width={74}
         cyclic
@@ -273,18 +399,22 @@ export function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
       <Text style={styles.colon}>:</Text>
       <WheelColumn
         accessibilityLabel="소비 시간 분 선택"
+        columnId="minute"
         formatValue={(minute) => String(minute).padStart(2, '0')}
         items={MINUTES}
-        onChange={(minute) => onChange({ ...value, minute })}
+        onChange={(minute) => updateValue({ minute })}
+        onInteractionStart={handleInteractionStart}
         selectedValue={value.minute}
         width={74}
         cyclic
       />
       <WheelColumn
         accessibilityLabel="소비 시간 오전 오후 선택"
+        columnId="period"
         formatValue={(period) => (period === 'AM' ? '오전' : '오후')}
         items={PERIODS}
-        onChange={(period) => onChange({ ...value, period })}
+        onChange={(period) => updateValue({ period })}
+        onInteractionStart={handleInteractionStart}
         selectedValue={value.period}
         width={82}
       />
