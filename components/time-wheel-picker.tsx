@@ -234,7 +234,7 @@ function WheelColumn<T extends string | number>({
         snapToAlignment="start"
         snapToInterval={ITEM_HEIGHT}>
         {displayItems.map((item, index) => {
-          const isSelected = index === visualSelectedIndexRef.current;
+          const isSelected = index === middleSelectedIndex;
 
           return (
             <WheelItem

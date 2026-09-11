@@ -60,6 +60,8 @@ export function ExpenseRecordEditor({
       return;
     }
 
+    // The editor intentionally resets its local form when a different record is opened.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAmount(String(record.amount));
     setCategory(record.category);
     setSatisfaction(record.satisfaction);
