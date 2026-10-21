@@ -1,9 +1,15 @@
-export const CATEGORIES = ['식사', '카페', '쇼핑', '교통', '취미', '생활', '기타'] as const;
+import {
+  CategoryIconName,
+  createLegacyCategoryId,
+  getDefaultCategoryByName,
+  normalizeCategoryIcon,
+} from '@/lib/categories';
+
 export const SATISFACTIONS = ['😫', '😕', '😐', '🙂', '😍'] as const;
 export const RECORDS_STORAGE_KEY = '@my-money-app/expense-records';
 export const DAILY_SATISFACTIONS_STORAGE_KEY = '@my-money-app/daily-satisfactions';
 
-export type Category = (typeof CATEGORIES)[number];
+export type Category = string;
 export type Satisfaction = (typeof SATISFACTIONS)[number];
 export type Period = 'AM' | 'PM';
 export type DailySatisfactions = Record<string, Satisfaction>;
@@ -12,6 +18,8 @@ export type ExpenseRecord = {
   id: string;
   amount: number;
   category: Category;
+  categoryId: string;
+  categoryIcon: CategoryIconName;
   satisfaction: Satisfaction;
   memo: string;
   createdAt: string;
@@ -22,11 +30,13 @@ export type ExpenseRecord = {
 
 export type StoredExpenseRecord = Omit<
   ExpenseRecord,
-  'occurredAt' | 'localDate' | 'timeZone'
+  'occurredAt' | 'localDate' | 'timeZone' | 'categoryId' | 'categoryIcon'
 > & {
   occurredAt?: string;
   localDate?: string;
   timeZone?: string;
+  categoryId?: string;
+  categoryIcon?: string;
 };
 
 export type TimeSelection = {
@@ -58,9 +68,13 @@ export function getCurrentTimeZone() {
 export function migrateExpenseRecord(record: StoredExpenseRecord): ExpenseRecord {
   const createdDate = new Date(record.createdAt);
   const safeCreatedDate = Number.isNaN(createdDate.getTime()) ? new Date() : createdDate;
+  const defaultCategory = getDefaultCategoryByName(record.category);
 
   return {
     ...record,
+    categoryId:
+      record.categoryId || defaultCategory?.id || createLegacyCategoryId(record.category),
+    categoryIcon: normalizeCategoryIcon(record.categoryIcon || defaultCategory?.icon),
     occurredAt: record.occurredAt || record.createdAt,
     localDate: record.localDate || getLocalDateKey(safeCreatedDate),
     timeZone: record.timeZone || getCurrentTimeZone(),

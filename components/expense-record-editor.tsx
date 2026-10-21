@@ -1,3 +1,4 @@
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -13,9 +14,8 @@ import {
 
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
 import { BrandColors } from '@/constants/theme';
+import { ExpenseCategory } from '@/lib/categories';
 import {
-  CATEGORIES,
-  Category,
   ExpenseRecord,
   getRecordTimeSelection,
   SATISFACTIONS,
@@ -25,13 +25,14 @@ import {
 
 export type ExpenseEditValues = {
   amount: number;
-  category: Category;
+  category: ExpenseCategory;
   satisfaction: Satisfaction;
   memo: string;
   time: TimeSelection;
 };
 
 type ExpenseRecordEditorProps = {
+  categories: ExpenseCategory[];
   record: ExpenseRecord | null;
   onClose: () => void;
   onDelete: (record: ExpenseRecord) => void;
@@ -44,6 +45,7 @@ function formatDate(dateKey: string) {
 }
 
 export function ExpenseRecordEditor({
+  categories,
   record,
   onClose,
   onDelete,
@@ -51,7 +53,7 @@ export function ExpenseRecordEditor({
 }: ExpenseRecordEditorProps) {
   const scrollRef = useRef<ScrollView>(null);
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState<Category | null>(null);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(null);
   const [memo, setMemo] = useState('');
   const [time, setTime] = useState<TimeSelection>({ hour: 12, minute: 0, period: 'AM' });
@@ -64,22 +66,31 @@ export function ExpenseRecordEditor({
     // The editor intentionally resets its local form when a different record is opened.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAmount(String(record.amount));
-    setCategory(record.category);
+    setCategoryId(record.categoryId);
     setSatisfaction(record.satisfaction);
     setMemo(record.memo);
     setTime(getRecordTimeSelection(record));
   }, [record]);
 
-  const canSave = Number(amount) > 0 && category !== null && satisfaction !== null;
+  const recordCategory: ExpenseCategory | null = record
+    ? { id: record.categoryId, name: record.category, icon: record.categoryIcon }
+    : null;
+  const categoryOptions =
+    recordCategory && !categories.some((item) => item.id === recordCategory.id)
+      ? [recordCategory, ...categories]
+      : categories;
+  const selectedCategory =
+    categoryOptions.find((item) => item.id === categoryId) ?? null;
+  const canSave = Number(amount) > 0 && selectedCategory !== null && satisfaction !== null;
 
   const handleSave = () => {
-    if (record === null || !canSave || category === null || satisfaction === null) {
+    if (record === null || !canSave || selectedCategory === null || satisfaction === null) {
       return;
     }
 
     void onSave(record, {
       amount: Number(amount),
-      category,
+      category: selectedCategory,
       satisfaction,
       memo: memo.trim(),
       time,
@@ -136,26 +147,31 @@ export function ExpenseRecordEditor({
               <View style={styles.section}>
                 <Text style={styles.label}>카테고리</Text>
                 <View style={styles.optionGrid}>
-                  {CATEGORIES.map((item) => {
-                    const isSelected = category === item;
+                  {categoryOptions.map((item) => {
+                    const isSelected = categoryId === item.id;
 
                     return (
                       <Pressable
                         accessibilityRole="button"
                         accessibilityState={{ selected: isSelected }}
-                        key={item}
-                        onPress={() => setCategory(item)}
+                        key={item.id}
+                        onPress={() => setCategoryId(item.id)}
                         style={({ pressed }) => [
                           styles.categoryButton,
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.pressed,
                         ]}>
+                        <MaterialCommunityIcons
+                          color={isSelected ? BrandColors.onPrimary : '#777D8E'}
+                          name={item.icon}
+                          size={18}
+                        />
                         <Text
                           style={[
                             styles.categoryText,
                             isSelected && styles.categoryTextSelected,
                           ]}>
-                          {item}
+                          {item.name}
                         </Text>
                       </Pressable>
                     );
@@ -288,7 +304,9 @@ const styles = StyleSheet.create({
     borderColor: '#E3E7DF',
     borderRadius: 10,
     borderWidth: 1,
+    flexDirection: 'row',
     flexBasis: '22%',
+    gap: 5,
     justifyContent: 'center',
     minHeight: 42,
     paddingHorizontal: 8,

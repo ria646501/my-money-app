@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -15,14 +16,16 @@ import {
 } from 'react-native';
 
 import {
+  CategoryManagerModal,
+} from '@/components/category-manager-modal';
+import {
   ExpenseEditValues,
   ExpenseRecordEditor,
 } from '@/components/expense-record-editor';
+import { HomeCharacterSlot } from '@/components/home-character-slot';
 import { TimePickerModal } from '@/components/time-picker-modal';
 import { BrandColors } from '@/constants/theme';
 import {
-  CATEGORIES,
-  Category,
   createOccurredAtFromSelection,
   DAILY_SATISFACTIONS_STORAGE_KEY,
   DailySatisfactions,
@@ -39,10 +42,37 @@ import {
   StoredExpenseRecord,
   TimeSelection,
 } from '@/lib/expense-record';
+import {
+  createInitialGrowthState,
+  getNextStageProgress,
+  GrowthState,
+} from '@/lib/growth';
+import {
+  grantAttendanceReward,
+  grantDailyReflectionReward,
+  grantExpenseRecordReward,
+  loadGrowthState,
+} from '@/lib/growth-storage';
+import {
+  CATEGORIES_STORAGE_KEY,
+  DEFAULT_CATEGORIES,
+  ExpenseCategory,
+  parseStoredCategories,
+} from '@/lib/categories';
+
+const SATISFACTION_BACKGROUNDS: Record<Satisfaction, string> = {
+  '😫': '#FFF0F2',
+  '😕': '#FFF6EC',
+  '😐': '#FFF9E8',
+  '🙂': '#EFFAF3',
+  '😍': '#F2EEFF',
+};
 
 export default function HomeScreen() {
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState<Category | null>(null);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  const [isCategoryManagerVisible, setIsCategoryManagerVisible] = useState(false);
   const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(null);
   const [memo, setMemo] = useState('');
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
@@ -55,6 +85,10 @@ export default function HomeScreen() {
   const [hasCustomizedNewRecordTime, setHasCustomizedNewRecordTime] = useState(false);
   const [isNewTimePickerVisible, setIsNewTimePickerVisible] = useState(false);
   const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
+  const [growthState, setGrowthState] = useState<GrowthState>(() =>
+    createInitialGrowthState()
+  );
+  const [isGrowthReady, setIsGrowthReady] = useState(false);
   const nextRecordId = useRef(0);
 
   const today = useMemo(
@@ -75,8 +109,52 @@ export default function HomeScreen() {
     });
   const todaySatisfaction = dailySatisfactions[todayDateKey] ?? null;
   const canSubmit =
-    isStorageReady && Number(amount) > 0 && category !== null && satisfaction !== null;
+    isStorageReady &&
+    Number(amount) > 0 &&
+    categoryId !== null &&
+    categories.some((item) => item.id === categoryId) &&
+    satisfaction !== null;
   const totalAmount = todayRecords.reduce((total, record) => total + record.amount, 0);
+  const growthProgress = getNextStageProgress(growthState.totalExp);
+  const didAttendToday = growthState.attendanceHistory[todayDateKey] !== undefined;
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const checkAttendance = async () => {
+        try {
+          const result = await grantAttendanceReward();
+
+          if (isActive) {
+            setGrowthState(result.state);
+          }
+        } catch (error) {
+          console.error('출석 보상을 저장하지 못했습니다.', error);
+
+          try {
+            const storedGrowthState = await loadGrowthState();
+
+            if (isActive) {
+              setGrowthState(storedGrowthState);
+            }
+          } catch (loadError) {
+            console.error('캐릭터 성장 데이터를 불러오지 못했습니다.', loadError);
+          }
+        } finally {
+          if (isActive) {
+            setIsGrowthReady(true);
+          }
+        }
+      };
+
+      void checkAttendance();
+
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -93,7 +171,12 @@ export default function HomeScreen() {
             if (Array.isArray(parsedRecords)) {
               const storedRecords = parsedRecords as StoredExpenseRecord[];
               const needsMigration = storedRecords.some(
-                (record) => !record.occurredAt || !record.localDate || !record.timeZone
+                (record) =>
+                  !record.occurredAt ||
+                  !record.localDate ||
+                  !record.timeZone ||
+                  !record.categoryId ||
+                  !record.categoryIcon
               );
               const migratedRecords = storedRecords.map(migrateExpenseRecord);
 
@@ -123,6 +206,53 @@ export default function HomeScreen() {
       };
 
       void loadRecords();
+
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const loadCategories = async () => {
+        try {
+          const savedCategories = await AsyncStorage.getItem(CATEGORIES_STORAGE_KEY);
+
+          if (!isActive) {
+            return;
+          }
+
+          if (savedCategories === null) {
+            setCategories(DEFAULT_CATEGORIES);
+            await AsyncStorage.setItem(
+              CATEGORIES_STORAGE_KEY,
+              JSON.stringify(DEFAULT_CATEGORIES)
+            );
+            return;
+          }
+
+          const parsedCategories = parseStoredCategories(JSON.parse(savedCategories));
+
+          if (parsedCategories === null) {
+            console.error('저장된 카테고리 형식이 올바르지 않습니다.');
+            return;
+          }
+
+          setCategories(parsedCategories);
+          setCategoryId((currentId) =>
+            currentId && parsedCategories.some((item) => item.id === currentId)
+              ? currentId
+              : null
+          );
+        } catch (error) {
+          console.error('카테고리를 불러오지 못했습니다.', error);
+        }
+      };
+
+      void loadCategories();
 
       return () => {
         isActive = false;
@@ -178,7 +308,9 @@ export default function HomeScreen() {
   };
 
   const handleSubmit = async () => {
-    if (Number(amount) <= 0 || category === null || satisfaction === null) {
+    const selectedCategory = categories.find((item) => item.id === categoryId);
+
+    if (Number(amount) <= 0 || !selectedCategory || satisfaction === null) {
       return;
     }
 
@@ -201,7 +333,9 @@ export default function HomeScreen() {
     const newRecord: ExpenseRecord = {
       id: `${Date.now()}-${nextRecordId.current}`,
       amount: Number(amount),
-      category,
+      category: selectedCategory.name,
+      categoryId: selectedCategory.id,
+      categoryIcon: selectedCategory.icon,
       satisfaction,
       memo: memo.trim(),
       createdAt: recordedAt.toISOString(),
@@ -211,19 +345,35 @@ export default function HomeScreen() {
     };
 
     const updatedRecords = [newRecord, ...records];
+    const isFirstRecordOfDate = todayRecords.length === 0;
+
+    try {
+      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+    } catch (error) {
+      console.error('소비 기록을 저장하지 못했습니다.', error);
+      Alert.alert('기록을 저장하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      return;
+    }
 
     setRecords(updatedRecords);
     setAmount('');
-    setCategory(null);
+    setCategoryId(null);
     setSatisfaction(null);
     setMemo('');
     setNewRecordTime(getTimeSelection(new Date()));
     setHasCustomizedNewRecordTime(false);
 
     try {
-      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+      const rewardResult = await grantExpenseRecordReward({
+        actionDate: localDate,
+        grantedAt: recordedAt.toISOString(),
+        isFirstRecordOfDate,
+        recordId: newRecord.id,
+        targetDate: localDate,
+      });
+      setGrowthState(rewardResult.state);
     } catch (error) {
-      console.error('소비 기록을 저장하지 못했습니다.', error);
+      console.error('소비 기록 보상을 저장하지 못했습니다.', error);
     }
   };
 
@@ -248,7 +398,10 @@ export default function HomeScreen() {
     const updatedRecord: ExpenseRecord = {
       ...record,
       amount: values.amount,
-      category: values.category,
+      category: values.category.id === record.categoryId ? record.category : values.category.name,
+      categoryId: values.category.id,
+      categoryIcon:
+        values.category.id === record.categoryId ? record.categoryIcon : values.category.icon,
       satisfaction: values.satisfaction,
       memo: values.memo,
       occurredAt,
@@ -264,6 +417,23 @@ export default function HomeScreen() {
       await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
     } catch (error) {
       console.error('수정한 소비 기록을 저장하지 못했습니다.', error);
+    }
+  };
+
+  const saveCategories = async (updatedCategories: ExpenseCategory[]) => {
+    try {
+      await AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updatedCategories));
+      setCategories(updatedCategories);
+      setCategoryId((currentId) =>
+        currentId && updatedCategories.some((item) => item.id === currentId)
+          ? currentId
+          : null
+      );
+      return true;
+    } catch (error) {
+      console.error('카테고리를 저장하지 못했습니다.', error);
+      Alert.alert('카테고리를 저장하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      return false;
     }
   };
 
@@ -300,8 +470,7 @@ export default function HomeScreen() {
       ...dailySatisfactions,
       [todayDateKey]: value,
     };
-
-    setDailySatisfactions(updatedDailySatisfactions);
+    const isFirstReflection = todaySatisfaction === null;
 
     try {
       await AsyncStorage.setItem(
@@ -310,6 +479,19 @@ export default function HomeScreen() {
       );
     } catch (error) {
       console.error('하루 만족도를 저장하지 못했습니다.', error);
+      Alert.alert('하루 만족도를 저장하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      return;
+    }
+
+    setDailySatisfactions(updatedDailySatisfactions);
+
+    if (isFirstReflection) {
+      try {
+        const rewardResult = await grantDailyReflectionReward({ targetDate: todayDateKey });
+        setGrowthState(rewardResult.state);
+      } catch (error) {
+        console.error('하루 회고 보상을 저장하지 못했습니다.', error);
+      }
     }
   };
 
@@ -331,15 +513,67 @@ export default function HomeScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <Text style={styles.date}>{today}</Text>
-            <Text style={styles.title}>오늘의 소비</Text>
+            <View style={styles.menuMark}>
+              <View style={styles.menuLine} />
+              <View style={styles.menuLine} />
+              <View style={styles.menuLine} />
+            </View>
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>재윤님 👋</Text>
+              <Text style={styles.date}>오늘도 좋은 하루예요! · {today}</Text>
+            </View>
+          </View>
+
+          <HomeCharacterSlot />
+
+          <View style={styles.growthCard}>
+            <View style={styles.growthHeader}>
+              <View>
+                <Text style={styles.growthStageLabel}>현재 성장 단계</Text>
+                <Text style={styles.growthStageName}>{growthProgress.stage.name}</Text>
+              </View>
+              <View style={styles.growthPointBadge}>
+                <MaterialCommunityIcons color={BrandColors.primary} name="star-four-points" size={15} />
+                <Text style={styles.growthPointText}>{growthState.totalPoints}P</Text>
+              </View>
+            </View>
+
+            <View style={styles.growthExpRow}>
+              <Text style={styles.growthExpText}>{growthState.totalExp} EXP</Text>
+              <Text style={styles.growthNextText}>
+                {growthProgress.nextStage
+                  ? `다음 성장까지 ${growthProgress.expToNextStage} EXP`
+                  : '최종 성장 단계'}
+              </Text>
+            </View>
+            <View style={styles.growthProgressTrack}>
+              <View
+                style={[
+                  styles.growthProgressFill,
+                  { width: `${Math.round(growthProgress.progress * 100)}%` },
+                ]}
+              />
+            </View>
+
+            <View style={styles.growthMetaRow}>
+              <Text style={styles.growthMetaText}>연속 출석 {growthState.currentStreak}일</Text>
+              <Text style={styles.growthAttendanceText}>
+                {isGrowthReady && didAttendToday ? '오늘 출석 완료 ✓' : '출석 확인 중'}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.entryArea}>
             <View style={styles.form}>
               <View style={styles.section}>
-                <Text style={styles.label}>금액</Text>
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.cardTitle}>얼마 썼어?</Text>
+                  <View style={styles.directInputBadge}>
+                    <Text style={styles.directInputText}>⌨  직접 입력</Text>
+                  </View>
+                </View>
                 <View style={styles.amountInputContainer}>
+                  <Text style={styles.wonSymbol}>₩</Text>
                   <TextInput
                     accessibilityLabel="소비 금액"
                     keyboardType="number-pad"
@@ -350,42 +584,60 @@ export default function HomeScreen() {
                     style={styles.amountInput}
                     value={amount ? Number(amount).toLocaleString('ko-KR') : ''}
                   />
-                  <Text style={styles.currency}>원</Text>
                 </View>
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.label}>어디에 썼어?</Text>
-                <View style={styles.optionGrid}>
-                  {CATEGORIES.map((item) => {
-                    const isSelected = category === item;
+                <Text style={styles.label}>어떤 소비야?</Text>
+                <ScrollView
+                  contentContainerStyle={styles.optionRow}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}>
+                  {categories.map((item) => {
+                    const isSelected = categoryId === item.id;
 
                     return (
                       <Pressable
                         accessibilityRole="button"
                         accessibilityState={{ selected: isSelected }}
-                        key={item}
-                        onPress={() => setCategory(item)}
+                        key={item.id}
+                        onPress={() => setCategoryId(item.id)}
                         style={({ pressed }) => [
                           styles.categoryButton,
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
+                        <MaterialCommunityIcons
+                          color={isSelected ? BrandColors.primary : '#8E93A8'}
+                          name={item.icon}
+                          size={21}
+                        />
                         <Text
                           style={[
                             styles.categoryText,
                             isSelected && styles.categoryTextSelected,
                           ]}>
-                          {item}
+                          {item.name}
                         </Text>
                       </Pressable>
                     );
                   })}
-                </View>
+                  <Pressable
+                    accessibilityLabel="카테고리 추가 및 관리"
+                    onPress={() => setIsCategoryManagerVisible(true)}
+                    style={({ pressed }) => [
+                      styles.categoryButton,
+                      styles.categoryManageButton,
+                      pressed && styles.buttonPressed,
+                    ]}>
+                    <MaterialCommunityIcons color={BrandColors.primary} name="plus" size={22} />
+                    <Text style={[styles.categoryText, styles.categoryManageText]}>추가</Text>
+                  </Pressable>
+                </ScrollView>
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.label}>만족도</Text>
+                <Text style={styles.label}>이 소비는 어땠어?</Text>
                 <View style={styles.satisfactionRow}>
                   {SATISFACTIONS.map((item) => {
                     const isSelected = satisfaction === item;
@@ -399,6 +651,7 @@ export default function HomeScreen() {
                         onPress={() => setSatisfaction(item)}
                         style={({ pressed }) => [
                           styles.satisfactionButton,
+                          { backgroundColor: SATISFACTION_BACKGROUNDS[item] },
                           isSelected && styles.satisfactionButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
@@ -409,34 +662,36 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              <View style={styles.section}>
-                <Text style={styles.label}>메모 (선택)</Text>
-                <TextInput
-                  accessibilityLabel="소비 메모"
-                  maxLength={100}
-                  onChangeText={setMemo}
-                  placeholder="간단한 메모"
-                  placeholderTextColor="#9CA3AF"
-                  style={styles.memoInput}
-                  value={memo}
-                />
-              </View>
+              <View style={styles.compactFieldsRow}>
+                <View style={[styles.section, styles.compactSection]}>
+                  <Text style={styles.label}>메모 (선택)</Text>
+                  <TextInput
+                    accessibilityLabel="소비 메모"
+                    maxLength={100}
+                    onChangeText={setMemo}
+                    placeholder="예) 아이스라떼, 친구랑"
+                    placeholderTextColor="#9CA3AF"
+                    style={styles.memoInput}
+                    value={memo}
+                  />
+                </View>
 
-              <View style={styles.section}>
-                <Text style={styles.label}>소비 시간</Text>
-                <Pressable
-                  accessibilityLabel={`소비 시간 ${formatTimeSelection(newRecordTime)}`}
-                  accessibilityRole="button"
-                  onPress={openNewRecordTimePicker}
-                  style={({ pressed }) => [
-                    styles.timeSelector,
-                    pressed && styles.buttonPressed,
-                  ]}>
-                  <Text style={styles.timeSelectorText}>
-                    {formatTimeSelection(newRecordTime)}
-                  </Text>
-                  <Text style={styles.timeSelectorArrow}>›</Text>
-                </Pressable>
+                <View style={[styles.section, styles.compactSection]}>
+                  <Text style={styles.label}>언제 썼어?</Text>
+                  <Pressable
+                    accessibilityLabel={`소비 시간 ${formatTimeSelection(newRecordTime)}`}
+                    accessibilityRole="button"
+                    onPress={openNewRecordTimePicker}
+                    style={({ pressed }) => [
+                      styles.timeSelector,
+                      pressed && styles.buttonPressed,
+                    ]}>
+                    <Text numberOfLines={1} style={styles.timeSelectorText}>
+                      {formatTimeSelection(newRecordTime)}
+                    </Text>
+                    <Text style={styles.timeSelectorArrow}>›</Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
 
@@ -452,15 +707,20 @@ export default function HomeScreen() {
               ]}>
               <Text
                 style={[styles.submitButtonText, !canSubmit && styles.submitButtonTextDisabled]}>
-                기록하기
+                ＋  기록하기
               </Text>
             </Pressable>
           </View>
 
           <View style={styles.recordsSection}>
             <View style={styles.recordsHeader}>
-              <Text style={styles.recordsTitle}>오늘 기록</Text>
-              <Text style={styles.totalAmount}>총 {totalAmount.toLocaleString('ko-KR')}원</Text>
+              <View style={styles.recordsTitleGroup}>
+                <Text style={styles.recordsTitle}>오늘의 기록</Text>
+                <View style={styles.recordCountBadge}>
+                  <Text style={styles.recordCountText}>{todayRecords.length}건</Text>
+                </View>
+              </View>
+              <Text style={styles.totalAmount}>₩ {totalAmount.toLocaleString('ko-KR')}</Text>
             </View>
 
             {todayRecords.length === 0 ? (
@@ -479,26 +739,33 @@ export default function HomeScreen() {
                       styles.recordItem,
                       pressed && styles.recordItemPressed,
                     ]}>
-                    <View style={styles.recordMainRow}>
-                      <Text style={styles.recordCategory}>{record.category}</Text>
-                      <View style={styles.recordAmountGroup}>
-                        <Text style={styles.recordAmount}>
-                          {record.amount.toLocaleString('ko-KR')}원
-                        </Text>
-                        <Text style={styles.recordSatisfaction}>{record.satisfaction}</Text>
-                      </View>
+                    <View style={styles.recordCategoryMark}>
+                      <MaterialCommunityIcons
+                        color="#858BA1"
+                        name={record.categoryIcon}
+                        size={19}
+                      />
                     </View>
-
-                    <View style={styles.recordDetailRow}>
+                    <View style={styles.recordInfo}>
+                      <Text style={styles.recordCategory}>{record.category}</Text>
                       {record.memo ? (
                         <Text numberOfLines={1} style={styles.recordMemo}>
                           {record.memo}
                         </Text>
                       ) : (
-                        <View style={styles.recordMemo} />
+                        <Text style={styles.recordMemoEmpty}>메모 없음</Text>
                       )}
-                      <Text style={styles.recordTime}>{formatRecordTime(record)}</Text>
                     </View>
+                    <View style={styles.recordFigures}>
+                      <Text style={styles.recordTime}>{formatRecordTime(record)}</Text>
+                      <Text numberOfLines={1} style={styles.recordAmount}>
+                        {record.amount.toLocaleString('ko-KR')}원
+                      </Text>
+                    </View>
+                    <View style={styles.recordMood}>
+                      <Text style={styles.recordSatisfaction}>{record.satisfaction}</Text>
+                    </View>
+                    <Text style={styles.recordChevron}>›</Text>
                   </Pressable>
                 ))}
               </View>
@@ -506,7 +773,10 @@ export default function HomeScreen() {
 
             {todayRecords.length > 0 && isDailySatisfactionReady ? (
               <View style={styles.dailyReview}>
-                <Text style={styles.dailyReviewTitle}>오늘의 소비는 어땠어?</Text>
+                <View style={styles.dailyReviewCopy}>
+                  <Text style={styles.dailyReviewTitle}>오늘의 소비는 어땠어?</Text>
+                  <Text style={styles.dailyReviewCaption}>하루를 한마디로 기록해봐요</Text>
+                </View>
                 <View style={styles.dailySatisfactionRow}>
                   {SATISFACTIONS.map((item) => {
                     const isSelected = todaySatisfaction === item;
@@ -520,6 +790,7 @@ export default function HomeScreen() {
                         onPress={() => void handleDailySatisfactionSelect(item)}
                         style={({ pressed }) => [
                           styles.dailySatisfactionButton,
+                          { backgroundColor: SATISFACTION_BACKGROUNDS[item] },
                           isSelected && styles.dailySatisfactionButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
@@ -545,10 +816,18 @@ export default function HomeScreen() {
       />
 
       <ExpenseRecordEditor
+        categories={categories}
         onClose={() => setEditingRecord(null)}
         onDelete={confirmDeleteRecord}
         onSave={saveEditedRecord}
         record={editingRecord}
+      />
+
+      <CategoryManagerModal
+        categories={categories}
+        onCategoriesChange={saveCategories}
+        onClose={() => setIsCategoryManagerVisible(false)}
+        visible={isCategoryManagerVisible}
       />
     </SafeAreaView>
   );
@@ -557,162 +836,283 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FAFBF8',
+    backgroundColor: BrandColors.background,
   },
   keyboardView: {
     flex: 1,
   },
   content: {
     flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 42,
     paddingBottom: 24,
+    paddingHorizontal: 18,
+    paddingTop: 12,
   },
   header: {
-    marginBottom: 22,
+    alignItems: 'center',
+    flexDirection: 'row',
+    minHeight: 52,
+    paddingHorizontal: 2,
   },
-  date: {
-    color: '#6B7280',
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 5,
+  growthCard: {
+    backgroundColor: BrandColors.surface,
+    borderColor: BrandColors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    marginBottom: 14,
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+  },
+  growthHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  growthStageLabel: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '700' },
+  growthStageName: { color: BrandColors.text, fontSize: 18, fontWeight: '900', marginTop: 2 },
+  growthPointBadge: {
+    alignItems: 'center',
+    backgroundColor: BrandColors.primarySoft,
+    borderRadius: 14,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  growthPointText: { color: BrandColors.primary, fontSize: 13, fontWeight: '800' },
+  growthExpRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 11,
+  },
+  growthExpText: { color: BrandColors.text, fontSize: 12, fontWeight: '800' },
+  growthNextText: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '600' },
+  growthProgressTrack: {
+    backgroundColor: BrandColors.surfaceSoft,
+    borderRadius: 5,
+    height: 8,
+    marginTop: 7,
+    overflow: 'hidden',
+  },
+  growthProgressFill: {
+    backgroundColor: BrandColors.primary,
+    borderRadius: 5,
+    height: '100%',
+  },
+  growthMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 9,
+  },
+  growthMetaText: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '700' },
+  growthAttendanceText: { color: BrandColors.primary, fontSize: 10, fontWeight: '800' },
+  menuMark: {
+    gap: 5,
+    marginRight: 16,
+    width: 28,
+  },
+  menuLine: {
+    backgroundColor: BrandColors.text,
+    borderRadius: 2,
+    height: 2,
+    width: 27,
+  },
+  headerCopy: {
+    flex: 1,
   },
   title: {
-    color: '#20231D',
-    fontSize: 27,
+    color: BrandColors.text,
+    fontSize: 19,
     fontWeight: '800',
-    letterSpacing: -0.6,
-    lineHeight: 34,
+    letterSpacing: -0.5,
+    lineHeight: 24,
+  },
+  date: {
+    color: BrandColors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 1,
   },
   entryArea: {
+    backgroundColor: BrandColors.surface,
+    borderColor: '#FFFFFF',
+    borderRadius: 22,
+    borderWidth: 1,
     flexShrink: 0,
+    marginTop: -4,
+    padding: 15,
+    shadowColor: '#493C7A',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.07,
+    shadowRadius: 18,
   },
   form: {
-    gap: 18,
+    gap: 15,
   },
   section: {
     gap: 8,
   },
-  label: {
-    color: '#343832',
-    fontSize: 15,
+  cardTitle: {
+    color: BrandColors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  cardTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  directInputBadge: {
+    backgroundColor: BrandColors.surfaceSoft,
+    borderRadius: 15,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  directInputText: {
+    color: BrandColors.textMuted,
+    fontSize: 11,
     fontWeight: '700',
+  },
+  label: {
+    color: BrandColors.text,
+    fontSize: 15,
+    fontWeight: '800',
   },
   amountInputContainer: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 13,
+    backgroundColor: BrandColors.surfaceSoft,
+    borderColor: '#F0EDF7',
+    borderRadius: 18,
     borderWidth: 1,
     flexDirection: 'row',
-    minHeight: 52,
-    paddingHorizontal: 14,
+    minHeight: 76,
+    paddingHorizontal: 18,
   },
-  amountInput: {
-    color: '#20231D',
-    flex: 1,
+  wonSymbol: {
+    color: '#B1ACBE',
     fontSize: 26,
     fontWeight: '700',
+    marginRight: 10,
+  },
+  amountInput: {
+    color: BrandColors.text,
+    flex: 1,
+    fontSize: 38,
+    fontWeight: '800',
+    letterSpacing: -1,
     paddingVertical: 8,
   },
-  currency: {
-    color: '#555B52',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  optionGrid: {
+  optionRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
+    paddingRight: 3,
   },
   categoryButton: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 12,
+    backgroundColor: '#F7F5FB',
+    borderColor: '#F3F0F8',
+    borderRadius: 16,
     borderWidth: 1,
-    flexBasis: '22%',
-    minHeight: 44,
+    height: 68,
     justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 7,
+    width: 68,
   },
   categoryButtonSelected: {
-    backgroundColor: BrandColors.primary,
+    backgroundColor: BrandColors.primarySoft,
     borderColor: BrandColors.primary,
   },
+  categoryManageButton: {
+    borderColor: BrandColors.primarySoft,
+  },
   categoryText: {
-    color: '#555B52',
-    fontSize: 14,
-    fontWeight: '600',
+    color: BrandColors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
   },
   categoryTextSelected: {
-    color: BrandColors.onPrimary,
+    color: BrandColors.primary,
+  },
+  categoryManageText: {
+    color: BrandColors.primary,
   },
   satisfactionRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 7,
   },
   satisfactionButton: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 13,
+    backgroundColor: BrandColors.surfaceSoft,
+    borderColor: '#EFEBF6',
+    borderRadius: 20,
     borderWidth: 1,
     flex: 1,
-    height: 50,
+    height: 42,
     justifyContent: 'center',
   },
   satisfactionButtonSelected: {
-    backgroundColor: BrandColors.primarySoft,
     borderColor: BrandColors.primary,
-    borderWidth: 2,
+    borderWidth: 1.5,
   },
   emoji: {
-    fontSize: 26,
+    fontSize: 21,
+  },
+  compactFieldsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  compactSection: {
+    flex: 1,
+    minWidth: 138,
   },
   memoInput: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 12,
+    backgroundColor: '#F7F5FB',
+    borderColor: '#F1EDF7',
+    borderRadius: 13,
     borderWidth: 1,
-    color: '#343832',
-    fontSize: 15,
-    height: 44,
+    color: BrandColors.text,
+    fontSize: 14,
+    height: 45,
     paddingHorizontal: 13,
     paddingVertical: 10,
   },
   timeSelector: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 12,
+    backgroundColor: '#F7F5FB',
+    borderColor: '#F1EDF7',
+    borderRadius: 13,
     borderWidth: 1,
     flexDirection: 'row',
-    height: 44,
+    height: 45,
     justifyContent: 'space-between',
     paddingHorizontal: 13,
   },
   timeSelectorText: {
-    color: '#343832',
-    fontSize: 15,
+    color: BrandColors.text,
+    flexShrink: 1,
+    fontSize: 13,
     fontWeight: '600',
   },
   timeSelectorArrow: {
-    color: '#8A9187',
+    color: BrandColors.primary,
     fontSize: 24,
     lineHeight: 26,
   },
   submitButton: {
     alignItems: 'center',
     backgroundColor: BrandColors.primary,
-    borderRadius: 14,
+    borderRadius: 16,
     justifyContent: 'center',
-    marginTop: 20,
-    minHeight: 52,
+    marginTop: 17,
+    minHeight: 55,
   },
   submitButtonDisabled: {
-    backgroundColor: '#E5E8E2',
+    backgroundColor: '#E9E6EF',
   },
   submitButtonPressed: {
     backgroundColor: BrandColors.primaryPressed,
@@ -720,115 +1120,160 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     color: BrandColors.onPrimary,
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
   },
   submitButtonTextDisabled: {
-    color: '#9AA097',
+    color: '#A5A1AE',
   },
   recordsSection: {
-    marginTop: 34,
+    backgroundColor: BrandColors.surface,
+    borderColor: '#FFFFFF',
+    borderRadius: 24,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 15,
+    shadowColor: '#493C7A',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.05,
+    shadowRadius: 18,
   },
   recordsHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  recordsTitleGroup: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
   },
   recordsTitle: {
-    color: '#20231D',
-    fontSize: 19,
+    color: BrandColors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  recordCountBadge: {
+    backgroundColor: BrandColors.primarySoft,
+    borderRadius: 9,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  recordCountText: {
+    color: BrandColors.primary,
+    fontSize: 11,
     fontWeight: '800',
   },
   totalAmount: {
-    color: '#555B52',
-    fontSize: 14,
-    fontWeight: '700',
+    color: BrandColors.primary,
+    fontSize: 17,
+    fontWeight: '800',
   },
   emptyState: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
+    borderColor: BrandColors.border,
     borderRadius: 12,
     borderWidth: 1,
     paddingVertical: 22,
   },
   emptyStateText: {
-    color: '#8A9187',
+    color: BrandColors.textMuted,
     fontSize: 14,
   },
   recordsList: {
-    gap: 10,
+    gap: 0,
   },
   recordItem: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    alignItems: 'center',
+    borderBottomColor: '#F0EDF5',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    minHeight: 65,
+    paddingVertical: 8,
   },
   recordItemPressed: {
-    backgroundColor: '#F4F7F0',
-    borderColor: BrandColors.primary,
+    backgroundColor: BrandColors.surfaceSoft,
   },
-  recordMainRow: {
+  recordCategoryMark: {
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: BrandColors.primarySoft,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    marginRight: 10,
+    width: 36,
+  },
+  recordInfo: {
+    flex: 1,
+    minWidth: 0,
   },
   recordCategory: {
-    backgroundColor: BrandColors.primarySoft,
-    borderRadius: 8,
-    color: BrandColors.onPrimary,
+    color: BrandColors.text,
     fontSize: 13,
-    fontWeight: '700',
-    overflow: 'hidden',
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  recordAmountGroup: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-  },
-  recordAmount: {
-    color: '#20231D',
-    fontSize: 16,
     fontWeight: '800',
   },
-  recordSatisfaction: {
-    fontSize: 22,
+  recordFigures: {
+    alignItems: 'flex-end',
+    marginLeft: 8,
+    maxWidth: 100,
   },
-  recordDetailRow: {
+  recordAmount: {
+    color: BrandColors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 3,
+  },
+  recordMood: {
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
+    backgroundColor: BrandColors.surfaceSoft,
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    marginLeft: 8,
+    width: 32,
+  },
+  recordSatisfaction: {
+    fontSize: 18,
   },
   recordMemo: {
-    color: '#656C62',
-    flex: 1,
-    fontSize: 13,
-    marginRight: 12,
+    color: BrandColors.textMuted,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  recordMemoEmpty: {
+    color: '#B1ADBB',
+    fontSize: 12,
+    marginTop: 3,
   },
   recordTime: {
-    color: '#92988F',
-    fontSize: 12,
+    color: BrandColors.textMuted,
+    fontSize: 11,
+  },
+  recordChevron: {
+    color: '#C3BDCE',
+    fontSize: 22,
+    marginLeft: 4,
   },
   dailyReview: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 14,
-    borderWidth: 1,
-    marginTop: 18,
-    padding: 14,
+    backgroundColor: BrandColors.primarySoft,
+    borderRadius: 16,
+    marginTop: 14,
+    padding: 13,
+  },
+  dailyReviewCopy: {
+    marginBottom: 10,
   },
   dailyReviewTitle: {
-    color: '#343832',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 12,
+    color: BrandColors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dailyReviewCaption: {
+    color: BrandColors.textMuted,
+    fontSize: 11,
+    marginTop: 3,
   },
   dailySatisfactionRow: {
     flexDirection: 'row',
@@ -836,21 +1281,20 @@ const styles = StyleSheet.create({
   },
   dailySatisfactionButton: {
     alignItems: 'center',
-    backgroundColor: '#FAFBF8',
-    borderColor: '#E3E7DF',
+    backgroundColor: '#FFFFFFB8',
+    borderColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
     flex: 1,
-    height: 48,
+    height: 44,
     justifyContent: 'center',
   },
   dailySatisfactionButtonSelected: {
-    backgroundColor: BrandColors.primarySoft,
     borderColor: BrandColors.primary,
-    borderWidth: 2,
+    borderWidth: 1.5,
   },
   dailySatisfactionEmoji: {
-    fontSize: 25,
+    fontSize: 21,
   },
   buttonPressed: {
     opacity: 0.75,

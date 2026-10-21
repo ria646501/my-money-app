@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
@@ -18,9 +20,13 @@ import {
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
 import { BrandColors } from '@/constants/theme';
 import {
+  CATEGORIES_STORAGE_KEY,
+  DEFAULT_CATEGORIES,
+  ExpenseCategory,
+  parseStoredCategories,
+} from '@/lib/categories';
+import {
   createOccurredAtFromSelection,
-  CATEGORIES,
-  Category,
   DAILY_SATISFACTIONS_STORAGE_KEY,
   DailySatisfactions,
   ExpenseRecord,
@@ -37,8 +43,13 @@ import {
   StoredExpenseRecord,
   TimeSelection,
 } from '@/lib/expense-record';
+import {
+  grantDailyReflectionReward,
+  grantExpenseRecordReward,
+} from '@/lib/growth-storage';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
 
 function formatSelectedDate(dateKey: string) {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -51,13 +62,17 @@ export default function CalendarScreen() {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
+  const [isMonthPickerVisible, setIsMonthPickerVisible] = useState(false);
+  const [pickerYear, setPickerYear] = useState(() => new Date().getFullYear());
+  const [isCalendarScrollEnabled, setIsCalendarScrollEnabled] = useState(true);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [dailySatisfactions, setDailySatisfactions] = useState<DailySatisfactions>({});
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [addingDateKey, setAddingDateKey] = useState<string | null>(null);
   const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
   const [editAmount, setEditAmount] = useState('');
-  const [editCategory, setEditCategory] = useState<Category | null>(null);
+  const [editCategoryId, setEditCategoryId] = useState<string | null>(null);
   const [editSatisfaction, setEditSatisfaction] = useState<Satisfaction | null>(null);
   const [editMemo, setEditMemo] = useState('');
   const [editTime, setEditTime] = useState<TimeSelection>({
@@ -66,15 +81,55 @@ export default function CalendarScreen() {
     period: 'AM',
   });
 
+  const monthSwipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dx) > 8 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.05,
+        onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+          Math.abs(gestureState.dx) > 8 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.05,
+        onPanResponderGrant: () => {
+          setIsCalendarScrollEnabled(false);
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          setIsCalendarScrollEnabled(true);
+
+          if (Math.abs(gestureState.dx) < 45 && Math.abs(gestureState.vx) < 0.35) {
+            return;
+          }
+
+          const direction = gestureState.dx < 0 ? 1 : -1;
+          setSelectedDateKey(null);
+          setVisibleMonth((currentMonth) =>
+            new Date(currentMonth.getFullYear(), currentMonth.getMonth() + direction, 1)
+          );
+        },
+        onPanResponderTerminate: () => {
+          setIsCalendarScrollEnabled(true);
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    []
+  );
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
+      const today = new Date();
+
+      setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+      setSelectedDateKey(null);
+      setIsMonthPickerVisible(false);
+      setIsCalendarScrollEnabled(true);
 
       const loadCalendarData = async () => {
         try {
-          const [savedRecords, savedDailySatisfactions] = await Promise.all([
+          const [savedRecords, savedDailySatisfactions, savedCategories] = await Promise.all([
             AsyncStorage.getItem(RECORDS_STORAGE_KEY),
             AsyncStorage.getItem(DAILY_SATISFACTIONS_STORAGE_KEY),
+            AsyncStorage.getItem(CATEGORIES_STORAGE_KEY),
           ]);
 
           if (!isActive) {
@@ -87,7 +142,12 @@ export default function CalendarScreen() {
             if (Array.isArray(parsedRecords)) {
               const storedRecords = parsedRecords as StoredExpenseRecord[];
               const needsMigration = storedRecords.some(
-                (record) => !record.occurredAt || !record.localDate || !record.timeZone
+                (record) =>
+                  !record.occurredAt ||
+                  !record.localDate ||
+                  !record.timeZone ||
+                  !record.categoryId ||
+                  !record.categoryIcon
               );
               const migratedRecords = storedRecords.map(migrateExpenseRecord);
 
@@ -127,6 +187,22 @@ export default function CalendarScreen() {
             }
           } else {
             setDailySatisfactions({});
+          }
+
+          if (savedCategories === null) {
+            setCategories(DEFAULT_CATEGORIES);
+            await AsyncStorage.setItem(
+              CATEGORIES_STORAGE_KEY,
+              JSON.stringify(DEFAULT_CATEGORIES)
+            );
+          } else {
+            const parsedCategories = parseStoredCategories(JSON.parse(savedCategories));
+
+            if (parsedCategories !== null) {
+              setCategories(parsedCategories);
+            } else {
+              console.error('저장된 카테고리 형식이 올바르지 않습니다.');
+            }
           }
         } catch (error) {
           console.error('달력 데이터를 불러오지 못했습니다.', error);
@@ -190,10 +266,22 @@ export default function CalendarScreen() {
     selectedDateKey === null ? null : (dailySatisfactions[selectedDateKey] ?? null);
   const canEditDailySatisfaction =
     selectedRecords.length > 0 || selectedDailySatisfaction !== null;
+  const editingCategoryOption: ExpenseCategory | null = editingRecord
+    ? {
+        id: editingRecord.categoryId,
+        name: editingRecord.category,
+        icon: editingRecord.categoryIcon,
+      }
+    : null;
+  const editCategoryOptions =
+    editingCategoryOption &&
+    !categories.some((item) => item.id === editingCategoryOption.id)
+      ? [editingCategoryOption, ...categories]
+      : categories;
   const canSaveEdit =
     (editingRecord !== null || addingDateKey !== null) &&
     Number(editAmount) > 0 &&
-    editCategory !== null &&
+    editCategoryId !== null &&
     editSatisfaction !== null;
 
   const openAddModal = () => {
@@ -204,7 +292,7 @@ export default function CalendarScreen() {
     setEditingRecord(null);
     setAddingDateKey(selectedDateKey);
     setEditAmount('');
-    setEditCategory(null);
+    setEditCategoryId(null);
     setEditSatisfaction(null);
     setEditMemo('');
     setEditTime(getTimeSelection(new Date()));
@@ -214,7 +302,7 @@ export default function CalendarScreen() {
     setAddingDateKey(null);
     setEditingRecord(record);
     setEditAmount(String(record.amount));
-    setEditCategory(record.category);
+    setEditCategoryId(record.categoryId);
     setEditSatisfaction(record.satisfaction);
     setEditMemo(record.memo);
     setEditTime(getRecordTimeSelection(record));
@@ -228,9 +316,24 @@ export default function CalendarScreen() {
   const saveEditedRecord = async () => {
     if (
       !canSaveEdit ||
-      editCategory === null ||
+      editCategoryId === null ||
       editSatisfaction === null
     ) {
+      return;
+    }
+
+    const fallbackRecordCategory: ExpenseCategory | null = editingRecord
+      ? {
+          id: editingRecord.categoryId,
+          name: editingRecord.category,
+          icon: editingRecord.categoryIcon,
+        }
+      : null;
+    const selectedCategory =
+      categories.find((item) => item.id === editCategoryId) ??
+      (fallbackRecordCategory?.id === editCategoryId ? fallbackRecordCategory : null);
+
+    if (selectedCategory === null) {
       return;
     }
 
@@ -256,7 +359,9 @@ export default function CalendarScreen() {
       const newRecord: ExpenseRecord = {
         id: `${recordedAt.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
         amount: Number(editAmount),
-        category: editCategory,
+        category: selectedCategory.name,
+        categoryId: selectedCategory.id,
+        categoryIcon: selectedCategory.icon,
         satisfaction: editSatisfaction,
         memo: editMemo.trim(),
         createdAt: recordedAt.toISOString(),
@@ -265,14 +370,29 @@ export default function CalendarScreen() {
         timeZone,
       };
       const updatedRecords = [newRecord, ...records];
+      const isFirstRecordOfDate = selectedRecords.length === 0;
 
       try {
         await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
-        setRecords(updatedRecords);
-        setAddingDateKey(null);
       } catch (error) {
         console.error('선택한 날짜의 소비 기록을 저장하지 못했습니다.', error);
         Alert.alert('기록을 저장하지 못했어요', '잠시 후 다시 시도해 주세요.');
+        return;
+      }
+
+      setRecords(updatedRecords);
+      setAddingDateKey(null);
+
+      try {
+        await grantExpenseRecordReward({
+          actionDate: getLocalDateKey(recordedAt),
+          grantedAt: recordedAt.toISOString(),
+          isFirstRecordOfDate,
+          recordId: newRecord.id,
+          targetDate: addingDateKey,
+        });
+      } catch (error) {
+        console.error('선택한 날짜의 소비 기록 보상을 저장하지 못했습니다.', error);
       }
 
       return;
@@ -299,7 +419,15 @@ export default function CalendarScreen() {
     const updatedRecord: ExpenseRecord = {
       ...editingRecord,
       amount: Number(editAmount),
-      category: editCategory,
+      category:
+        selectedCategory.id === editingRecord.categoryId
+          ? editingRecord.category
+          : selectedCategory.name,
+      categoryId: selectedCategory.id,
+      categoryIcon:
+        selectedCategory.id === editingRecord.categoryId
+          ? editingRecord.categoryIcon
+          : selectedCategory.icon,
       satisfaction: editSatisfaction,
       memo: editMemo.trim(),
       occurredAt: updatedOccurredAt,
@@ -357,8 +485,7 @@ export default function CalendarScreen() {
       ...dailySatisfactions,
       [selectedDateKey]: value,
     };
-
-    setDailySatisfactions(updatedDailySatisfactions);
+    const isFirstReflection = selectedDailySatisfaction === null;
 
     try {
       await AsyncStorage.setItem(
@@ -367,6 +494,18 @@ export default function CalendarScreen() {
       );
     } catch (error) {
       console.error('선택한 날짜의 하루 만족도를 저장하지 못했습니다.', error);
+      Alert.alert('하루 만족도를 저장하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      return;
+    }
+
+    setDailySatisfactions(updatedDailySatisfactions);
+
+    if (isFirstReflection) {
+      try {
+        await grantDailyReflectionReward({ targetDate: selectedDateKey });
+      } catch (error) {
+        console.error('선택한 날짜의 하루 회고 보상을 저장하지 못했습니다.', error);
+      }
     }
   };
 
@@ -379,7 +518,10 @@ export default function CalendarScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        scrollEnabled={isCalendarScrollEnabled}
+        showsVerticalScrollIndicator={false}>
         <View style={styles.monthHeader}>
           <Pressable
             accessibilityLabel="이전 달"
@@ -393,9 +535,22 @@ export default function CalendarScreen() {
             <Text style={styles.monthButtonText}>‹</Text>
           </Pressable>
 
-          <Text style={styles.monthTitle}>
-            {year}년 {monthIndex + 1}월
-          </Text>
+          <Pressable
+            accessibilityLabel="연도와 월 선택"
+            accessibilityRole="button"
+            onPress={() => {
+              setPickerYear(year);
+              setIsMonthPickerVisible(true);
+            }}
+            style={({ pressed }) => [
+              styles.monthTitleButton,
+              pressed && styles.monthTitleButtonPressed,
+            ]}>
+            <Text style={styles.monthTitle}>
+              {year}년 {monthIndex + 1}월
+            </Text>
+            <MaterialCommunityIcons color={BrandColors.textMuted} name="chevron-down" size={19} />
+          </Pressable>
 
           <Pressable
             accessibilityLabel="다음 달"
@@ -410,22 +565,23 @@ export default function CalendarScreen() {
           </Pressable>
         </View>
 
-        <View style={styles.weekdayRow}>
-          {WEEKDAYS.map((weekday, index) => (
-            <Text
-              key={weekday}
-              style={[
-                styles.weekday,
-                index === 0 && styles.sunday,
-                index === 6 && styles.saturday,
-              ]}>
-              {weekday}
-            </Text>
-          ))}
-        </View>
+        <View {...monthSwipeResponder.panHandlers}>
+          <View style={styles.weekdayRow}>
+            {WEEKDAYS.map((weekday, index) => (
+              <Text
+                key={weekday}
+                style={[
+                  styles.weekday,
+                  index === 0 && styles.sunday,
+                  index === 6 && styles.saturday,
+                ]}>
+                {weekday}
+              </Text>
+            ))}
+          </View>
 
-        <View style={styles.calendarGrid}>
-          {calendarDays.map((day, index) => {
+          <View style={styles.calendarGrid}>
+            {calendarDays.map((day, index) => {
             if (day === null) {
               return <View key={`empty-${index}`} style={styles.dayCell} />;
             }
@@ -467,7 +623,8 @@ export default function CalendarScreen() {
                 </Pressable>
               </View>
             );
-          })}
+            })}
+          </View>
         </View>
 
         {selectedDateKey !== null ? (
@@ -549,7 +706,14 @@ export default function CalendarScreen() {
                       pressed && styles.detailRecordPressed,
                     ]}>
                     <View style={styles.detailRecordMain}>
-                      <Text style={styles.detailCategory}>{record.category}</Text>
+                      <View style={styles.detailCategory}>
+                        <MaterialCommunityIcons
+                          color={BrandColors.primary}
+                          name={record.categoryIcon}
+                          size={16}
+                        />
+                        <Text style={styles.detailCategoryText}>{record.category}</Text>
+                      </View>
                       <View style={styles.detailAmountGroup}>
                         <Text style={styles.detailAmount}>
                           {record.amount.toLocaleString('ko-KR')}원
@@ -575,6 +739,94 @@ export default function CalendarScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setIsMonthPickerVisible(false)}
+        transparent
+        visible={isMonthPickerVisible}>
+        <View style={styles.monthPickerOverlay}>
+          <View style={styles.monthPickerCard}>
+            <View style={styles.monthPickerHeader}>
+              <Pressable
+                accessibilityLabel="10년 전"
+                onPress={() => setPickerYear((currentYear) => currentYear - 10)}
+                style={styles.yearJumpButton}>
+                <Text style={styles.yearJumpText}>−10</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel="이전 연도"
+                onPress={() => setPickerYear((currentYear) => currentYear - 1)}
+                style={styles.yearButton}>
+                <MaterialCommunityIcons color={BrandColors.text} name="chevron-left" size={24} />
+              </Pressable>
+              <Text style={styles.pickerYearText}>{pickerYear}년</Text>
+              <Pressable
+                accessibilityLabel="다음 연도"
+                onPress={() => setPickerYear((currentYear) => currentYear + 1)}
+                style={styles.yearButton}>
+                <MaterialCommunityIcons color={BrandColors.text} name="chevron-right" size={24} />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="10년 후"
+                onPress={() => setPickerYear((currentYear) => currentYear + 10)}
+                style={styles.yearJumpButton}>
+                <Text style={styles.yearJumpText}>+10</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.monthPickerGrid}>
+              {MONTHS.map((month) => {
+                const isCurrentSelection = pickerYear === year && month === monthIndex + 1;
+
+                return (
+                  <Pressable
+                    accessibilityLabel={`${pickerYear}년 ${month}월로 이동`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isCurrentSelection }}
+                    key={month}
+                    onPress={() => {
+                      setVisibleMonth(new Date(pickerYear, month - 1, 1));
+                      setSelectedDateKey(null);
+                      setIsMonthPickerVisible(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.monthPickerButton,
+                      isCurrentSelection && styles.monthPickerButtonSelected,
+                      pressed && styles.buttonPressed,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.monthPickerButtonText,
+                        isCurrentSelection && styles.monthPickerButtonTextSelected,
+                      ]}>
+                      {month}월
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.monthPickerFooter}>
+              <Pressable
+                onPress={() => {
+                  const today = new Date();
+                  setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+                  setSelectedDateKey(null);
+                  setIsMonthPickerVisible(false);
+                }}
+                style={styles.todayMonthButton}>
+                <Text style={styles.todayMonthButtonText}>이번 달</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setIsMonthPickerVisible(false)}
+                style={styles.monthPickerCloseButton}>
+                <Text style={styles.monthPickerCloseText}>닫기</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         animationType="slide"
@@ -637,26 +889,31 @@ export default function CalendarScreen() {
                 <View style={styles.editSection}>
                   <Text style={styles.editLabel}>카테고리</Text>
                   <View style={styles.editOptionGrid}>
-                    {CATEGORIES.map((item) => {
-                      const isSelected = editCategory === item;
+                    {editCategoryOptions.map((item) => {
+                      const isSelected = editCategoryId === item.id;
 
                       return (
                         <Pressable
                           accessibilityRole="button"
                           accessibilityState={{ selected: isSelected }}
-                          key={item}
-                          onPress={() => setEditCategory(item)}
+                          key={item.id}
+                          onPress={() => setEditCategoryId(item.id)}
                           style={({ pressed }) => [
                             styles.editCategoryButton,
                             isSelected && styles.editCategoryButtonSelected,
                             pressed && styles.buttonPressed,
                           ]}>
+                          <MaterialCommunityIcons
+                            color={isSelected ? BrandColors.onPrimary : '#747A72'}
+                            name={item.icon}
+                            size={17}
+                          />
                           <Text
                             style={[
                               styles.editCategoryText,
                               isSelected && styles.editCategoryTextSelected,
                             ]}>
-                            {item}
+                            {item.name}
                           </Text>
                         </Pressable>
                       );
@@ -776,6 +1033,17 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -0.5,
   },
+  monthTitleButton: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  monthTitleButtonPressed: {
+    backgroundColor: BrandColors.primarySoft,
+  },
   monthButton: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
@@ -818,6 +1086,87 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
+  monthPickerOverlay: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(28, 24, 42, 0.35)',
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+  },
+  monthPickerCard: {
+    backgroundColor: BrandColors.surface,
+    borderRadius: 22,
+    maxWidth: 390,
+    padding: 18,
+    width: '100%',
+  },
+  monthPickerHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  yearJumpButton: {
+    alignItems: 'center',
+    backgroundColor: BrandColors.surfaceSoft,
+    borderRadius: 9,
+    height: 36,
+    justifyContent: 'center',
+    width: 45,
+  },
+  yearJumpText: { color: BrandColors.textMuted, fontSize: 12, fontWeight: '700' },
+  yearButton: {
+    alignItems: 'center',
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  pickerYearText: {
+    color: BrandColors.text,
+    fontSize: 21,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  monthPickerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  monthPickerButton: {
+    alignItems: 'center',
+    backgroundColor: BrandColors.surfaceSoft,
+    borderColor: 'transparent',
+    borderRadius: 12,
+    borderWidth: 1,
+    height: 48,
+    justifyContent: 'center',
+    width: '23%',
+  },
+  monthPickerButtonSelected: {
+    backgroundColor: BrandColors.primarySoft,
+    borderColor: BrandColors.primary,
+  },
+  monthPickerButtonText: { color: BrandColors.text, fontSize: 15, fontWeight: '700' },
+  monthPickerButtonTextSelected: { color: BrandColors.primary, fontWeight: '800' },
+  monthPickerFooter: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'flex-end',
+    marginTop: 18,
+  },
+  todayMonthButton: {
+    alignItems: 'center',
+    borderRadius: 10,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 15,
+  },
+  todayMonthButtonText: { color: BrandColors.primary, fontSize: 14, fontWeight: '800' },
+  monthPickerCloseButton: {
+    alignItems: 'center',
+    backgroundColor: BrandColors.primary,
+    borderRadius: 10,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 18,
+  },
+  monthPickerCloseText: { color: BrandColors.onPrimary, fontSize: 14, fontWeight: '800' },
   dayCell: {
     height: 82,
     padding: 2,
@@ -997,14 +1346,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   detailCategory: {
+    alignItems: 'center',
     backgroundColor: BrandColors.primarySoft,
     borderRadius: 8,
-    color: BrandColors.onPrimary,
-    fontSize: 13,
-    fontWeight: '700',
-    overflow: 'hidden',
+    flexDirection: 'row',
+    gap: 5,
     paddingHorizontal: 9,
     paddingVertical: 5,
+  },
+  detailCategoryText: {
+    color: BrandColors.primary,
+    fontSize: 13,
+    fontWeight: '700',
   },
   detailAmountGroup: {
     alignItems: 'center',
@@ -1126,7 +1479,9 @@ const styles = StyleSheet.create({
     borderColor: '#E3E7DF',
     borderRadius: 11,
     borderWidth: 1,
+    flexDirection: 'row',
     flexBasis: '22%',
+    gap: 5,
     minHeight: 42,
     justifyContent: 'center',
   },
