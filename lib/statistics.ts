@@ -1,3 +1,4 @@
+import { SATISFACTIONS } from '@/lib/expense-record';
 import type {
   DailySatisfactions,
   ExpenseRecord,
@@ -15,6 +16,30 @@ export type CategoryBreakdownItem = {
 export type MonthChange = {
   amountDifference: number;
   percentage: number;
+};
+
+export type SatisfactionBreakdownItem = {
+  count: number;
+  percentage: number;
+  satisfaction: Satisfaction;
+};
+
+export type CategorySatisfactionRankingItem = {
+  averageSatisfaction: number;
+  categoryIcon: ExpenseRecord['categoryIcon'];
+  categoryId: string;
+  categoryName: string;
+  recordCount: number;
+  totalAmount: number;
+};
+
+// This score exists only for statistics presentation. Stored satisfaction values never change.
+const SATISFACTION_SCORE: Record<Satisfaction, number> = {
+  '😫': 1,
+  '😕': 2,
+  '😐': 3,
+  '🙂': 4,
+  '😍': 5,
 };
 
 export function getMonthKey(year: number, monthIndex: number) {
@@ -139,6 +164,165 @@ export function getCategoryBreakdown(
         ];
 
   return assignWholePercentages(visibleCategories, total);
+}
+
+export function getSatisfactionBreakdown(
+  records: ExpenseRecord[]
+): SatisfactionBreakdownItem[] {
+  if (records.length === 0) {
+    return [];
+  }
+
+  const counts = new Map<Satisfaction, number>();
+  records.forEach((record) => {
+    counts.set(record.satisfaction, (counts.get(record.satisfaction) ?? 0) + 1);
+  });
+
+  const items = SATISFACTIONS.map((satisfaction, order) => {
+      const count = counts.get(satisfaction) ?? 0;
+      const exactPercentage = (count / records.length) * 100;
+      return {
+        count,
+        exactPercentage,
+        floorPercentage: Math.floor(exactPercentage),
+        order,
+        satisfaction,
+      };
+    });
+  let remaining = 100 - items.reduce((sum, item) => sum + item.floorPercentage, 0);
+
+  items
+    .slice()
+    .sort(
+      (first, second) =>
+        second.exactPercentage - second.floorPercentage -
+          (first.exactPercentage - first.floorPercentage) || first.order - second.order
+    )
+    .forEach((item) => {
+      if (remaining > 0) {
+        item.floorPercentage += 1;
+        remaining -= 1;
+      }
+    });
+
+  return items
+    .map(({ count, floorPercentage, order, satisfaction }) => ({
+      count,
+      order,
+      percentage: floorPercentage,
+      satisfaction,
+    }))
+    .filter((item) => item.count > 0)
+    .sort((first, second) => second.count - first.count || first.order - second.order)
+    .map(({ count, percentage, satisfaction }) => ({ count, percentage, satisfaction }));
+}
+
+export function getMonthlyDailySatisfactionBreakdown(
+  dailySatisfactions: DailySatisfactions,
+  year: number,
+  monthIndex: number
+): SatisfactionBreakdownItem[] {
+  const monthlySatisfactions = Object.values(
+    getMonthlyDailySatisfactions(dailySatisfactions, year, monthIndex)
+  );
+
+  if (monthlySatisfactions.length === 0) {
+    return [];
+  }
+
+  const counts = new Map<Satisfaction, number>();
+  monthlySatisfactions.forEach((satisfaction) => {
+    counts.set(satisfaction, (counts.get(satisfaction) ?? 0) + 1);
+  });
+
+  const items = SATISFACTIONS.map((satisfaction, order) => {
+    const count = counts.get(satisfaction) ?? 0;
+    const exactPercentage = (count / monthlySatisfactions.length) * 100;
+
+    return {
+      count,
+      exactPercentage,
+      floorPercentage: Math.floor(exactPercentage),
+      order,
+      satisfaction,
+    };
+  });
+  let remaining = 100 - items.reduce((sum, item) => sum + item.floorPercentage, 0);
+
+  items
+    .slice()
+    .sort(
+      (first, second) =>
+        second.exactPercentage - second.floorPercentage -
+          (first.exactPercentage - first.floorPercentage) || first.order - second.order
+    )
+    .forEach((item) => {
+      if (remaining > 0) {
+        item.floorPercentage += 1;
+        remaining -= 1;
+      }
+    });
+
+  return items
+    .map(({ count, floorPercentage, order, satisfaction }) => ({
+      count,
+      order,
+      percentage: floorPercentage,
+      satisfaction,
+    }))
+    .filter((item) => item.count > 0)
+    .sort((first, second) => second.count - first.count || first.order - second.order)
+    .map(({ count, percentage, satisfaction }) => ({ count, percentage, satisfaction }));
+}
+
+export function getCategorySatisfactionRanking(
+  records: ExpenseRecord[],
+  limit = 3
+): CategorySatisfactionRankingItem[] {
+  if (limit < 1) {
+    return [];
+  }
+
+  const grouped = new Map<
+    string,
+    Omit<CategorySatisfactionRankingItem, 'averageSatisfaction'> & {
+      satisfactionTotal: number;
+    }
+  >();
+
+  records.forEach((record) => {
+    const existing = grouped.get(record.categoryId);
+
+    if (existing) {
+      existing.recordCount += 1;
+      existing.satisfactionTotal += SATISFACTION_SCORE[record.satisfaction];
+      existing.totalAmount += record.amount;
+      return;
+    }
+
+    grouped.set(record.categoryId, {
+      categoryIcon: record.categoryIcon,
+      categoryId: record.categoryId,
+      categoryName: record.category,
+      recordCount: 1,
+      satisfactionTotal: SATISFACTION_SCORE[record.satisfaction],
+      totalAmount: record.amount,
+    });
+  });
+
+  return Array.from(grouped.values())
+    .map(({ satisfactionTotal, ...item }) => ({
+      ...item,
+      averageSatisfaction: satisfactionTotal / item.recordCount,
+    }))
+    .sort(
+      (first, second) =>
+        second.averageSatisfaction - first.averageSatisfaction ||
+        second.recordCount - first.recordCount ||
+        second.totalAmount - first.totalAmount ||
+        first.categoryName.localeCompare(second.categoryName, 'ko-KR')
+    )
+    .slice(0, limit);
 }
 
 export function getMonthlyDailySatisfactions(

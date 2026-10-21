@@ -164,12 +164,12 @@ export function CategoryManagerModal({
   } | null>(null);
   const [isListScrollEnabled, setIsListScrollEnabled] = useState(true);
   const [name, setName] = useState('');
-  const [icon, setIcon] = useState<CategoryIconName>('tag-outline');
+  const [icon, setIcon] = useState<CategoryIconName>(CATEGORY_ICON_OPTIONS[0]);
 
   const resetForm = () => {
     setEditingId(null);
     setName('');
-    setIcon('tag-outline');
+    setIcon(CATEGORY_ICON_OPTIONS[0]);
   };
 
   const handleClose = () => {
@@ -343,7 +343,7 @@ export function CategoryManagerModal({
                           styles.iconButton,
                           isSelected && styles.iconButtonSelected,
                         ]}>
-                        <CategoryIconImage icon={item} size={34} />
+                        <CategoryIconImage icon={item} size={48} />
                       </Pressable>
                     );
                   })}

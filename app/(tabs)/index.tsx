@@ -18,13 +18,19 @@ import {
 import {
   CategoryManagerModal,
 } from '@/components/category-manager-modal';
-import { CategoryIconImage } from '@/components/category-icon-image';
+import {
+  CategoryIconImage,
+  PRIMARY_CATEGORY_ICON_SIZE,
+} from '@/components/category-icon-image';
 import {
   ExpenseEditValues,
   ExpenseRecordEditor,
 } from '@/components/expense-record-editor';
 import { CharacterRoom } from '@/components/character-room';
-import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
+import {
+  PRIMARY_SATISFACTION_ICON_SIZE,
+  SatisfactionIconImage,
+} from '@/components/satisfaction-icon-image';
 import { TimePickerModal } from '@/components/time-picker-modal';
 import { BrandColors } from '@/constants/theme';
 import {
@@ -58,8 +64,11 @@ import {
 } from '@/lib/growth-storage';
 import {
   CATEGORIES_STORAGE_KEY,
+  CATEGORY_CATALOG_VERSION_KEY,
+  CURRENT_CATEGORY_CATALOG_VERSION,
   DEFAULT_CATEGORIES,
   ExpenseCategory,
+  getHomeSelectableCategories,
   parseStoredCategories,
 } from '@/lib/categories';
 
@@ -83,6 +92,11 @@ const HOME_COLORS = {
   pinkSoft: '#FFE7F0',
   lavenderSoft: '#F2EDFF',
 } as const;
+
+const HOME_OPTION_CARD_GAP = 4;
+const HOME_OPTION_CARD_HEIGHT = 92;
+const HOME_OPTION_CARD_RADIUS = 8;
+const HOME_CATEGORY_CARD_WIDTH = 64;
 
 export default function HomeScreen() {
   const [amount, setAmount] = useState('');
@@ -242,7 +256,10 @@ export default function HomeScreen() {
 
       const loadCategories = async () => {
         try {
-          const savedCategories = await AsyncStorage.getItem(CATEGORIES_STORAGE_KEY);
+          const [savedCategories, savedCatalogVersion] = await Promise.all([
+            AsyncStorage.getItem(CATEGORIES_STORAGE_KEY),
+            AsyncStorage.getItem(CATEGORY_CATALOG_VERSION_KEY),
+          ]);
 
           if (!isActive) {
             return;
@@ -254,6 +271,10 @@ export default function HomeScreen() {
               CATEGORIES_STORAGE_KEY,
               JSON.stringify(DEFAULT_CATEGORIES)
             );
+            await AsyncStorage.setItem(
+              CATEGORY_CATALOG_VERSION_KEY,
+              CURRENT_CATEGORY_CATALOG_VERSION
+            );
             return;
           }
 
@@ -262,6 +283,13 @@ export default function HomeScreen() {
           if (parsedCategories === null) {
             console.error('저장된 카테고리 형식이 올바르지 않습니다.');
             return;
+          }
+
+          if (savedCatalogVersion !== CURRENT_CATEGORY_CATALOG_VERSION) {
+            await AsyncStorage.setItem(
+              CATEGORY_CATALOG_VERSION_KEY,
+              CURRENT_CATEGORY_CATALOG_VERSION
+            );
           }
 
           setCategories(parsedCategories);
@@ -586,11 +614,12 @@ export default function HomeScreen() {
                   contentContainerStyle={styles.optionRow}
                   horizontal
                   showsHorizontalScrollIndicator={false}>
-                  {categories.map((item) => {
+                  {getHomeSelectableCategories(categories).map((item) => {
                     const isSelected = categoryId === item.id;
 
                     return (
                       <Pressable
+                        accessibilityLabel={item.name}
                         accessibilityRole="button"
                         accessibilityState={{ selected: isSelected }}
                         key={item.id}
@@ -600,12 +629,11 @@ export default function HomeScreen() {
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
-                        <CategoryIconImage icon={item.icon} size={30} />
-                        <Text
-                          style={[
-                            styles.categoryText,
-                            isSelected && styles.categoryTextSelected,
-                          ]}>
+                        <CategoryIconImage
+                          icon={item.icon}
+                          size={PRIMARY_CATEGORY_ICON_SIZE}
+                        />
+                        <Text numberOfLines={1} style={styles.categoryText}>
                           {item.name}
                         </Text>
                       </Pressable>
@@ -644,7 +672,10 @@ export default function HomeScreen() {
                           isSelected && styles.satisfactionButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
-                        <SatisfactionIconImage satisfaction={item} size={58} />
+                        <SatisfactionIconImage
+                          satisfaction={item}
+                          size={PRIMARY_SATISFACTION_ICON_SIZE}
+                        />
                       </Pressable>
                     );
                   })}
@@ -779,7 +810,10 @@ export default function HomeScreen() {
                           isSelected && styles.dailySatisfactionButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
-                        <SatisfactionIconImage satisfaction={item} size={58} />
+                        <SatisfactionIconImage
+                          satisfaction={item}
+                          size={PRIMARY_SATISFACTION_ICON_SIZE}
+                        />
                       </Pressable>
                     );
                   })}
@@ -842,7 +876,7 @@ const styles = StyleSheet.create({
   },
   headerSparkle: {
     color: '#6D5A88',
-    fontSize: 40,
+    fontSize: 24,
     fontWeight: '800',
     width: 34,
   },
@@ -852,7 +886,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: HOME_COLORS.ink,
-    fontSize: 32,
+    fontSize: 19,
     fontWeight: '900',
     letterSpacing: -0.5,
   },
@@ -874,7 +908,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
-  attendanceText: { color: HOME_COLORS.pink, fontSize: 18, fontWeight: '800' },
+  attendanceText: { color: HOME_COLORS.pink, fontSize: 11, fontWeight: '800' },
   dailySummaryCard: {
     alignItems: 'center',
     backgroundColor: HOME_COLORS.card,
@@ -919,7 +953,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     color: HOME_COLORS.ink,
-    fontSize: 28,
+    fontSize: 17,
     fontWeight: '800',
     letterSpacing: -0.3,
   },
@@ -936,12 +970,12 @@ const styles = StyleSheet.create({
   },
   directInputText: {
     color: '#7D6E96',
-    fontSize: 20,
+    fontSize: 12,
     fontWeight: '700',
   },
   label: {
     color: HOME_COLORS.ink,
-    fontSize: 24,
+    fontSize: 14,
     fontWeight: '800',
   },
   amountInputContainer: {
@@ -956,34 +990,34 @@ const styles = StyleSheet.create({
   },
   wonSymbol: {
     color: '#D59AB3',
-    fontSize: 42,
+    fontSize: 25,
     fontWeight: '700',
     marginRight: 10,
   },
   amountInput: {
     color: HOME_COLORS.ink,
     flex: 1,
-    fontSize: 58,
+    fontSize: 35,
     fontWeight: '800',
     letterSpacing: -1,
     paddingVertical: 8,
   },
   optionRow: {
     flexDirection: 'row',
-    gap: 4,
+    gap: HOME_OPTION_CARD_GAP,
     paddingRight: 3,
   },
   categoryButton: {
     alignItems: 'center',
     backgroundColor: '#FFF7F8',
     borderColor: '#F7E6EC',
-    borderRadius: 8,
+    borderRadius: HOME_OPTION_CARD_RADIUS,
     borderWidth: 1,
-    height: 92,
+    height: HOME_OPTION_CARD_HEIGHT,
     justifyContent: 'center',
     paddingHorizontal: 3,
     paddingVertical: 5,
-    width: 78,
+    width: HOME_CATEGORY_CARD_WIDTH,
   },
   categoryButtonSelected: {
     backgroundColor: HOME_COLORS.pinkSoft,
@@ -994,28 +1028,27 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     color: HOME_COLORS.muted,
-    fontSize: 16,
+    fontSize: 10,
     fontWeight: '700',
     marginTop: 4,
-  },
-  categoryTextSelected: {
-    color: HOME_COLORS.pink,
+    textAlign: 'center',
+    width: '100%',
   },
   categoryManageText: {
     color: '#8566DC',
   },
   satisfactionRow: {
     flexDirection: 'row',
-    gap: 1,
+    gap: HOME_OPTION_CARD_GAP,
   },
   satisfactionButton: {
     alignItems: 'center',
     backgroundColor: BrandColors.surfaceSoft,
     borderColor: '#F2DFE6',
-    borderRadius: 8,
+    borderRadius: HOME_OPTION_CARD_RADIUS,
     borderWidth: 1,
     flex: 1,
-    height: 70,
+    height: HOME_OPTION_CARD_HEIGHT,
     justifyContent: 'center',
   },
   satisfactionButtonSelected: {
@@ -1037,7 +1070,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     borderWidth: 1,
     color: HOME_COLORS.ink,
-    fontSize: 22,
+    fontSize: 13,
     height: 64,
     paddingHorizontal: 10,
     paddingVertical: 10,
@@ -1056,13 +1089,13 @@ const styles = StyleSheet.create({
   timeSelectorText: {
     color: HOME_COLORS.ink,
     flexShrink: 1,
-    fontSize: 20,
+    fontSize: 12,
     fontWeight: '600',
   },
   timeSelectorArrow: {
     color: HOME_COLORS.pink,
-    fontSize: 38,
-    lineHeight: 40,
+    fontSize: 23,
+    lineHeight: 24,
   },
   submitButton: {
     alignItems: 'center',
@@ -1081,7 +1114,7 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     color: BrandColors.onPrimary,
-    fontSize: 28,
+    fontSize: 17,
     fontWeight: '800',
   },
   submitButtonTextDisabled: {
@@ -1104,7 +1137,7 @@ const styles = StyleSheet.create({
   },
   recordsTitle: {
     color: BrandColors.text,
-    fontSize: 26,
+    fontSize: 16,
     fontWeight: '900',
   },
   recordCountBadge: {
@@ -1115,12 +1148,12 @@ const styles = StyleSheet.create({
   },
   recordCountText: {
     color: HOME_COLORS.pink,
-    fontSize: 20,
+    fontSize: 12,
     fontWeight: '800',
   },
   totalAmount: {
     color: HOME_COLORS.pink,
-    fontSize: 27,
+    fontSize: 16,
     fontWeight: '900',
     letterSpacing: -0.8,
   },
@@ -1134,7 +1167,7 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     color: HOME_COLORS.muted,
-    fontSize: 28,
+    fontSize: 17,
   },
   recordsList: {
     gap: 8,
@@ -1168,7 +1201,7 @@ const styles = StyleSheet.create({
   },
   recordCategory: {
     color: HOME_COLORS.ink,
-    fontSize: 24,
+    fontSize: 14,
     fontWeight: '800',
   },
   recordFigures: {
@@ -1178,7 +1211,7 @@ const styles = StyleSheet.create({
   },
   recordAmount: {
     color: HOME_COLORS.ink,
-    fontSize: 22,
+    fontSize: 13,
     fontWeight: '800',
     marginTop: 3,
   },
@@ -1191,21 +1224,21 @@ const styles = StyleSheet.create({
   },
   recordMemo: {
     color: HOME_COLORS.muted,
-    fontSize: 20,
+    fontSize: 12,
     marginTop: 3,
   },
   recordMemoEmpty: {
     color: '#B1ADBB',
-    fontSize: 20,
+    fontSize: 12,
     marginTop: 3,
   },
   recordTime: {
     color: HOME_COLORS.muted,
-    fontSize: 18,
+    fontSize: 11,
   },
   recordChevron: {
     color: '#C3BDCE',
-    fontSize: 36,
+    fontSize: 22,
     marginLeft: 4,
   },
   dailyReview: {
@@ -1221,12 +1254,12 @@ const styles = StyleSheet.create({
   },
   dailyReviewTitle: {
     color: HOME_COLORS.ink,
-    fontSize: 26,
+    fontSize: 16,
     fontWeight: '800',
   },
   dailyReviewCaption: {
     color: HOME_COLORS.muted,
-    fontSize: 20,
+    fontSize: 12,
     marginTop: 3,
   },
   dailySatisfactionRow: {
@@ -1249,7 +1282,7 @@ const styles = StyleSheet.create({
   },
   dailyReviewFooter: {
     color: HOME_COLORS.muted,
-    fontSize: 18,
+    fontSize: 11,
     marginTop: 8,
   },
   buttonPressed: {

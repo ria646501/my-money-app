@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -12,7 +14,6 @@ import {
 } from 'react-native';
 
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
-import { BrandColors } from '@/constants/theme';
 import { CategoryIconImage } from '@/components/category-icon-image';
 import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
 import { ExpenseCategory } from '@/lib/categories';
@@ -23,6 +24,16 @@ import {
   Satisfaction,
   TimeSelection,
 } from '@/lib/expense-record';
+
+const SATISFACTION_LABELS: Record<Satisfaction, string> = {
+  '😫': '매우 불만족',
+  '😕': '불만족',
+  '😐': '보통',
+  '🙂': '만족',
+  '😍': '매우 만족',
+};
+
+const MEMO_MAX_LENGTH = 100;
 
 export type ExpenseEditValues = {
   amount: number;
@@ -53,6 +64,7 @@ export function ExpenseRecordEditor({
   onSave,
 }: ExpenseRecordEditorProps) {
   const scrollRef = useRef<ScrollView>(null);
+  const [sheetTranslateY] = useState(() => new Animated.Value(0));
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [satisfaction, setSatisfaction] = useState<Satisfaction | null>(null);
@@ -83,6 +95,51 @@ export function ExpenseRecordEditor({
   const selectedCategory =
     categoryOptions.find((item) => item.id === categoryId) ?? null;
   const canSave = Number(amount) > 0 && selectedCategory !== null && satisfaction !== null;
+  const dragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          gestureState.dy > 8 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.2,
+        onPanResponderMove: (_, gestureState) => {
+          sheetTranslateY.setValue(Math.max(0, gestureState.dy));
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const shouldClose =
+            gestureState.dy >= 90 || (gestureState.dy >= 35 && gestureState.vy >= 0.9);
+
+          if (shouldClose) {
+            Animated.timing(sheetTranslateY, {
+              duration: 180,
+              toValue: 420,
+              useNativeDriver: true,
+            }).start(({ finished }) => {
+              if (finished) {
+                onClose();
+                sheetTranslateY.setValue(0);
+              }
+            });
+            return;
+          }
+
+          Animated.spring(sheetTranslateY, {
+            bounciness: 0,
+            speed: 22,
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(sheetTranslateY, {
+            bounciness: 0,
+            speed: 22,
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [onClose, sheetTranslateY]
+  );
 
   const handleSave = () => {
     if (record === null || !canSave || selectedCategory === null || satisfaction === null) {
@@ -104,35 +161,41 @@ export function ExpenseRecordEditor({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardView}>
         <View style={styles.overlay}>
-          <View style={styles.card}>
+          <Animated.View style={[styles.card, { transform: [{ translateY: sheetTranslateY }] }]}>
             <ScrollView
               contentContainerStyle={styles.content}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
               ref={scrollRef}
               showsVerticalScrollIndicator={false}>
-              <View style={styles.header}>
-                <View>
-                  <Text style={styles.title}>소비 기록 수정</Text>
-                  {record ? (
-                    <Text style={styles.date}>
-                      {formatDate(record.localDate)} · {record.timeZone}
-                    </Text>
-                  ) : null}
+              <View {...dragResponder.panHandlers} style={styles.dragRegion}>
+                <View style={styles.sheetHandle} />
+                <View style={styles.header}>
+                  <View>
+                    <Text style={styles.title}>소비 기록 수정</Text>
+                    {record ? (
+                      <View style={styles.datePill}>
+                        <Text style={styles.date}>
+                          {formatDate(record.localDate)} · {record.timeZone}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Pressable
+                    accessibilityLabel="수정 닫기"
+                    accessibilityRole="button"
+                    hitSlop={8}
+                    onPress={onClose}
+                    style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}>
+                    <Text style={styles.closeText}>×</Text>
+                  </Pressable>
                 </View>
-                <Pressable
-                  accessibilityLabel="수정 닫기"
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={onClose}
-                  style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}>
-                  <Text style={styles.closeText}>×</Text>
-                </Pressable>
               </View>
 
               <View style={styles.section}>
                 <Text style={styles.label}>금액</Text>
                 <View style={styles.amountInputContainer}>
+                  <Text pointerEvents="none" style={styles.wonPrefix}>₩</Text>
                   <TextInput
                     accessibilityLabel="수정할 소비 금액"
                     keyboardType="number-pad"
@@ -141,7 +204,6 @@ export function ExpenseRecordEditor({
                     style={styles.amountInput}
                     value={amount}
                   />
-                  <Text style={styles.currency}>원</Text>
                 </View>
               </View>
 
@@ -153,6 +215,7 @@ export function ExpenseRecordEditor({
 
                     return (
                       <Pressable
+                        accessibilityLabel={item.name}
                         accessibilityRole="button"
                         accessibilityState={{ selected: isSelected }}
                         key={item.id}
@@ -162,14 +225,7 @@ export function ExpenseRecordEditor({
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.pressed,
                         ]}>
-                        <CategoryIconImage icon={item.icon} size={30} />
-                        <Text
-                          style={[
-                            styles.categoryText,
-                            isSelected && styles.categoryTextSelected,
-                          ]}>
-                          {item.name}
-                        </Text>
+                        <CategoryIconImage icon={item.icon} size={46} />
                       </Pressable>
                     );
                   })}
@@ -177,7 +233,7 @@ export function ExpenseRecordEditor({
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.label}>개별 소비 만족도</Text>
+                <Text style={styles.label}>이 소비는 어땠어?</Text>
                 <View style={styles.satisfactionRow}>
                   {SATISFACTIONS.map((item) => {
                     const isSelected = satisfaction === item;
@@ -195,6 +251,14 @@ export function ExpenseRecordEditor({
                           pressed && styles.pressed,
                         ]}>
                         <SatisfactionIconImage satisfaction={item} size={36} />
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.satisfactionLabel,
+                            isSelected && styles.satisfactionLabelSelected,
+                          ]}>
+                          {SATISFACTION_LABELS[item]}
+                        </Text>
                       </Pressable>
                     );
                   })}
@@ -203,20 +267,28 @@ export function ExpenseRecordEditor({
 
               <View style={styles.section}>
                 <Text style={styles.label}>메모 (선택)</Text>
-                <TextInput
-                  accessibilityLabel="수정할 소비 메모"
-                  maxLength={100}
-                  onChangeText={setMemo}
-                  placeholder="간단한 메모"
-                  placeholderTextColor="#9CA3AF"
-                  style={styles.memoInput}
-                  value={memo}
-                />
+                <View style={styles.memoContainer}>
+                  <TextInput
+                    accessibilityLabel="수정할 소비 메모"
+                    maxLength={MEMO_MAX_LENGTH}
+                    onChangeText={setMemo}
+                    multiline
+                    placeholder="예) 친구랑 게임~!"
+                    placeholderTextColor="#9CA3AF"
+                    style={styles.memoInput}
+                    value={memo}
+                  />
+                  <Text pointerEvents="none" style={styles.memoCounter}>
+                    {memo.length}/{MEMO_MAX_LENGTH}
+                  </Text>
+                </View>
               </View>
 
               <View style={styles.section}>
                 <Text style={styles.label}>소비 시간</Text>
                 <TimeWheelPicker
+                  accentColor="#F778AB"
+                  highlightColor="#FFF0F6"
                   onChange={setTime}
                   onGestureActiveChange={(isActive) => {
                     scrollRef.current?.setNativeProps({ scrollEnabled: !isActive });
@@ -243,12 +315,12 @@ export function ExpenseRecordEditor({
                     pressed && canSave && styles.saveButtonPressed,
                   ]}>
                   <Text style={[styles.saveButtonText, !canSave && styles.saveButtonTextDisabled]}>
-                    저장
+                    저장하기
                   </Text>
                 </Pressable>
               </View>
             </ScrollView>
-          </View>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -258,109 +330,148 @@ export function ExpenseRecordEditor({
 const styles = StyleSheet.create({
   keyboardView: { flex: 1 },
   overlay: {
-    backgroundColor: 'rgba(25, 29, 23, 0.35)',
+    backgroundColor: 'rgba(43, 39, 63, 0.38)',
     flex: 1,
     justifyContent: 'flex-end',
   },
   card: {
-    backgroundColor: '#FAFBF8',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '92%',
+    backgroundColor: '#FFFCF8',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '94%',
     overflow: 'hidden',
   },
-  content: { paddingBottom: 34, paddingHorizontal: 20, paddingTop: 18 },
+  content: { paddingBottom: 28, paddingHorizontal: 20, paddingTop: 10 },
+  dragRegion: { marginHorizontal: -20, paddingHorizontal: 20 },
+  sheetHandle: {
+    alignSelf: 'center',
+    backgroundColor: '#E8DCE4',
+    borderRadius: 3,
+    height: 5,
+    marginBottom: 16,
+    width: 48,
+  },
   header: {
     alignItems: 'flex-start',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 22,
+    borderBottomColor: '#F7CEDD',
+    borderBottomWidth: 1,
+    marginHorizontal: -20,
+    marginBottom: 20,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
   },
-  title: { color: '#20231D', fontSize: 22, fontWeight: '800' },
-  date: { color: '#7A8177', fontSize: 12, marginTop: 5 },
-  closeButton: { alignItems: 'center', height: 36, justifyContent: 'center', width: 36 },
-  closeText: { color: '#596057', fontSize: 30, fontWeight: '300', lineHeight: 32 },
-  section: { gap: 8, marginBottom: 18 },
-  label: { color: '#343832', fontSize: 14, fontWeight: '700' },
+  title: { color: '#302D55', fontSize: 21, fontWeight: '900' },
+  datePill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F1E8FF',
+    borderRadius: 13,
+    marginTop: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  date: { color: '#8C7EA6', fontSize: 12, fontWeight: '600' },
+  closeButton: {
+    alignItems: 'center',
+    backgroundColor: '#F3EBFF',
+    borderRadius: 22,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  closeText: { color: '#81789A', fontSize: 29, fontWeight: '300', lineHeight: 31 },
+  section: { gap: 8, marginBottom: 16 },
+  label: { color: '#302D55', fontSize: 15, fontWeight: '800' },
   amountInputContainer: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
+    backgroundColor: '#F6EFFF',
+    borderColor: '#E2D1FF',
     borderRadius: 12,
     borderWidth: 1,
     flexDirection: 'row',
-    minHeight: 48,
-    paddingHorizontal: 13,
+    minHeight: 62,
+    paddingHorizontal: 14,
   },
-  amountInput: { color: '#20231D', flex: 1, fontSize: 20, fontWeight: '700' },
-  currency: { color: '#555B52', fontSize: 15, fontWeight: '600' },
-  optionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  amountInput: { color: '#302D55', flex: 1, fontSize: 28, fontWeight: '900', lineHeight: 34, paddingVertical: 0 },
+  wonPrefix: { color: '#D68BAA', fontSize: 26, fontWeight: '800', lineHeight: 34, marginRight: 7 },
+  optionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   categoryButton: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
-    borderRadius: 10,
+    borderColor: '#EEDDE5',
+    borderRadius: 11,
     borderWidth: 1,
-    flexDirection: 'row',
-    flexBasis: '22%',
-    gap: 5,
+    flexBasis: '18.8%',
+    gap: 3,
     justifyContent: 'center',
-    minHeight: 42,
-    paddingHorizontal: 8,
+    minHeight: 62,
+    paddingHorizontal: 3,
+    paddingVertical: 6,
   },
-  categoryButtonSelected: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
-  categoryText: { color: '#555B52', fontSize: 13, fontWeight: '600' },
-  categoryTextSelected: { color: BrandColors.onPrimary },
-  satisfactionRow: { flexDirection: 'row', gap: 7 },
+  categoryButtonSelected: { backgroundColor: '#FFF0F6', borderColor: '#FF75AB' },
+  satisfactionRow: { flexDirection: 'row', gap: 5 },
   satisfactionButton: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
+    borderColor: '#EEDDE5',
     borderRadius: 11,
     borderWidth: 1,
     flex: 1,
-    height: 48,
+    gap: 4,
+    height: 68,
     justifyContent: 'center',
   },
   satisfactionButtonSelected: {
-    backgroundColor: BrandColors.primarySoft,
-    borderColor: BrandColors.primary,
-    borderWidth: 2,
+    backgroundColor: '#FFF0F6',
+    borderColor: '#FF75AB',
+    borderWidth: 1.5,
   },
   satisfactionEmoji: { fontSize: 24 },
-  memoInput: {
+  satisfactionLabel: { color: '#8F849C', fontSize: 10, fontWeight: '600' },
+  satisfactionLabelSelected: { color: '#E85C96', fontWeight: '800' },
+  memoContainer: {
     backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
+    borderColor: '#EEDDE5',
     borderRadius: 11,
     borderWidth: 1,
-    color: '#343832',
-    fontSize: 14,
-    height: 44,
-    paddingHorizontal: 12,
+    height: 78,
+    overflow: 'hidden',
+    position: 'relative',
   },
+  memoInput: {
+    color: '#302D55',
+    fontSize: 14,
+    height: '100%',
+    paddingBottom: 25,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    textAlignVertical: 'top',
+  },
+  memoCounter: { bottom: 8, color: '#9C92AA', fontSize: 10, position: 'absolute', right: 10 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   deleteButton: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderColor: '#E5B9B3',
+    borderColor: '#EF9AA4',
     borderRadius: 13,
     borderWidth: 1,
     justifyContent: 'center',
     minHeight: 50,
-    width: 88,
+    flex: 1,
   },
-  deleteButtonText: { color: '#B65045', fontSize: 15, fontWeight: '700' },
+  deleteButtonText: { color: '#D64F61', fontSize: 16, fontWeight: '800' },
   saveButton: {
     alignItems: 'center',
-    backgroundColor: BrandColors.primary,
+    backgroundColor: '#F778AB',
     borderRadius: 13,
     flex: 1,
     justifyContent: 'center',
     minHeight: 50,
   },
   saveButtonDisabled: { backgroundColor: '#E5E8E2' },
-  saveButtonPressed: { backgroundColor: BrandColors.primaryPressed },
-  saveButtonText: { color: BrandColors.onPrimary, fontSize: 15, fontWeight: '800' },
+  saveButtonPressed: { backgroundColor: '#E85C96' },
+  saveButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   saveButtonTextDisabled: { color: '#9AA097' },
   pressed: { opacity: 0.75 },
 });

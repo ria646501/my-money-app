@@ -333,12 +333,16 @@ type TimeWheelPickerProps = {
   value: TimeSelection;
   onChange: (value: TimeSelection) => void;
   onGestureActiveChange?: (isActive: boolean) => void;
+  accentColor?: string;
+  highlightColor?: string;
 };
 
 export function TimeWheelPicker({
   value,
   onChange,
   onGestureActiveChange,
+  accentColor = BrandColors.primary,
+  highlightColor = BrandColors.primarySoft,
 }: TimeWheelPickerProps) {
   const activeColumnRef = useRef<{ columnId: string; stop: () => void } | null>(null);
   const isGestureActiveRef = useRef(false);
@@ -384,7 +388,13 @@ export function TimeWheelPicker({
       onTouchEnd={handlePickerTouchEnd}
       onTouchStart={handlePickerTouchStart}
       style={styles.container}>
-      <View pointerEvents="none" style={styles.selectionHighlight} />
+      <View
+        pointerEvents="none"
+        style={[
+          styles.selectionHighlight,
+          { backgroundColor: highlightColor, borderColor: accentColor },
+        ]}
+      />
       <WheelColumn
         accessibilityLabel="소비 시간 시 선택"
         columnId="hour"

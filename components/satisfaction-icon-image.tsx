@@ -10,6 +10,8 @@ const SATISFACTION_IMAGES: Record<Satisfaction, ImageSourcePropType> = {
   '😍': require('@/assets/satisfaction/very-satisfied.png'),
 };
 
+export const PRIMARY_SATISFACTION_ICON_SIZE = 58;
+
 type SatisfactionIconImageProps = {
   satisfaction: Satisfaction;
   size?: number;
@@ -32,6 +34,7 @@ export function SatisfactionIconImage({
 
 const styles = StyleSheet.create({
   image: {
+    alignSelf: 'center',
     flexShrink: 0,
   },
 });

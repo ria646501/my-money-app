@@ -18,11 +18,16 @@ import {
 } from 'react-native';
 
 import { CategoryIconImage } from '@/components/category-icon-image';
-import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
+import {
+  PRIMARY_SATISFACTION_ICON_SIZE,
+  SatisfactionIconImage,
+} from '@/components/satisfaction-icon-image';
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
 import { BrandColors } from '@/constants/theme';
 import {
   CATEGORIES_STORAGE_KEY,
+  CATEGORY_CATALOG_VERSION_KEY,
+  CURRENT_CATEGORY_CATALOG_VERSION,
   DEFAULT_CATEGORIES,
   ExpenseCategory,
   parseStoredCategories,
@@ -128,10 +133,11 @@ export default function CalendarScreen() {
 
       const loadCalendarData = async () => {
         try {
-          const [savedRecords, savedDailySatisfactions, savedCategories] = await Promise.all([
+          const [savedRecords, savedDailySatisfactions, savedCategories, savedCatalogVersion] = await Promise.all([
             AsyncStorage.getItem(RECORDS_STORAGE_KEY),
             AsyncStorage.getItem(DAILY_SATISFACTIONS_STORAGE_KEY),
             AsyncStorage.getItem(CATEGORIES_STORAGE_KEY),
+            AsyncStorage.getItem(CATEGORY_CATALOG_VERSION_KEY),
           ]);
 
           if (!isActive) {
@@ -197,10 +203,21 @@ export default function CalendarScreen() {
               CATEGORIES_STORAGE_KEY,
               JSON.stringify(DEFAULT_CATEGORIES)
             );
+            await AsyncStorage.setItem(
+              CATEGORY_CATALOG_VERSION_KEY,
+              CURRENT_CATEGORY_CATALOG_VERSION
+            );
           } else {
             const parsedCategories = parseStoredCategories(JSON.parse(savedCategories));
 
             if (parsedCategories !== null) {
+              if (savedCatalogVersion !== CURRENT_CATEGORY_CATALOG_VERSION) {
+                await AsyncStorage.setItem(
+                  CATEGORY_CATALOG_VERSION_KEY,
+                  CURRENT_CATEGORY_CATALOG_VERSION
+                );
+              }
+
               setCategories(parsedCategories);
             } else {
               console.error('저장된 카테고리 형식이 올바르지 않습니다.');
@@ -609,7 +626,10 @@ export default function CalendarScreen() {
                   ]}>
                   <Text style={[styles.dayNumber, isToday && styles.todayNumber]}>{day}</Text>
                   {dailySatisfaction ? (
-                    <SatisfactionIconImage satisfaction={dailySatisfaction} size={22} />
+                    <SatisfactionIconImage
+                      satisfaction={dailySatisfaction}
+                      size={PRIMARY_SATISFACTION_ICON_SIZE}
+                    />
                   ) : (
                     <View style={styles.satisfactionSpace} />
                   )}
@@ -892,6 +912,7 @@ export default function CalendarScreen() {
 
                       return (
                         <Pressable
+                          accessibilityLabel={item.name}
                           accessibilityRole="button"
                           accessibilityState={{ selected: isSelected }}
                           key={item.id}
@@ -901,14 +922,7 @@ export default function CalendarScreen() {
                             isSelected && styles.editCategoryButtonSelected,
                             pressed && styles.buttonPressed,
                           ]}>
-                          <CategoryIconImage icon={item.icon} size={30} />
-                          <Text
-                            style={[
-                              styles.editCategoryText,
-                              isSelected && styles.editCategoryTextSelected,
-                            ]}>
-                            {item.name}
-                          </Text>
+                          <CategoryIconImage icon={item.icon} size={42} />
                         </Pressable>
                       );
                     })}
@@ -1162,7 +1176,7 @@ const styles = StyleSheet.create({
   },
   monthPickerCloseText: { color: BrandColors.onPrimary, fontSize: 14, fontWeight: '800' },
   dayCell: {
-    height: 82,
+    height: 104,
     padding: 2,
     width: '14.2857%',
   },
@@ -1201,7 +1215,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   satisfactionSpace: {
-    height: 28,
+    height: PRIMARY_SATISFACTION_ICON_SIZE,
   },
   amount: {
     color: '#626960',
@@ -1473,23 +1487,13 @@ const styles = StyleSheet.create({
     borderColor: '#E3E7DF',
     borderRadius: 11,
     borderWidth: 1,
-    flexDirection: 'row',
     flexBasis: '22%',
-    gap: 5,
-    minHeight: 42,
+    minHeight: 54,
     justifyContent: 'center',
   },
   editCategoryButtonSelected: {
     backgroundColor: BrandColors.primary,
     borderColor: BrandColors.primary,
-  },
-  editCategoryText: {
-    color: '#596057',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  editCategoryTextSelected: {
-    color: BrandColors.onPrimary,
   },
   editSatisfactionRow: {
     flexDirection: 'row',
