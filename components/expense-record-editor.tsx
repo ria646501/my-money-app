@@ -1,4 +1,3 @@
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -14,6 +13,8 @@ import {
 
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
 import { BrandColors } from '@/constants/theme';
+import { CategoryIconImage } from '@/components/category-icon-image';
+import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
 import { ExpenseCategory } from '@/lib/categories';
 import {
   ExpenseRecord,
@@ -161,11 +162,7 @@ export function ExpenseRecordEditor({
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.pressed,
                         ]}>
-                        <MaterialCommunityIcons
-                          color={isSelected ? BrandColors.onPrimary : '#777D8E'}
-                          name={item.icon}
-                          size={18}
-                        />
+                        <CategoryIconImage icon={item.icon} size={30} />
                         <Text
                           style={[
                             styles.categoryText,
@@ -197,7 +194,7 @@ export function ExpenseRecordEditor({
                           isSelected && styles.satisfactionButtonSelected,
                           pressed && styles.pressed,
                         ]}>
-                        <Text style={styles.satisfactionEmoji}>{item}</Text>
+                        <SatisfactionIconImage satisfaction={item} size={36} />
                       </Pressable>
                     );
                   })}

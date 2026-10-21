@@ -17,6 +17,8 @@ import {
   View,
 } from 'react-native';
 
+import { CategoryIconImage } from '@/components/category-icon-image';
+import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
 import { BrandColors } from '@/constants/theme';
 import {
@@ -607,7 +609,7 @@ export default function CalendarScreen() {
                   ]}>
                   <Text style={[styles.dayNumber, isToday && styles.todayNumber]}>{day}</Text>
                   {dailySatisfaction ? (
-                    <Text style={styles.satisfaction}>{dailySatisfaction}</Text>
+                    <SatisfactionIconImage satisfaction={dailySatisfaction} size={22} />
                   ) : (
                     <View style={styles.satisfactionSpace} />
                   )}
@@ -651,7 +653,7 @@ export default function CalendarScreen() {
                             isSelected && styles.summarySatisfactionButtonSelected,
                             pressed && styles.buttonPressed,
                           ]}>
-                          <Text style={styles.summarySatisfactionEmoji}>{item}</Text>
+                          <SatisfactionIconImage satisfaction={item} size={32} />
                         </Pressable>
                       );
                     })}
@@ -707,18 +709,14 @@ export default function CalendarScreen() {
                     ]}>
                     <View style={styles.detailRecordMain}>
                       <View style={styles.detailCategory}>
-                        <MaterialCommunityIcons
-                          color={BrandColors.primary}
-                          name={record.categoryIcon}
-                          size={16}
-                        />
+                        <CategoryIconImage icon={record.categoryIcon} size={28} />
                         <Text style={styles.detailCategoryText}>{record.category}</Text>
                       </View>
                       <View style={styles.detailAmountGroup}>
                         <Text style={styles.detailAmount}>
                           {record.amount.toLocaleString('ko-KR')}원
                         </Text>
-                        <Text style={styles.detailSatisfaction}>{record.satisfaction}</Text>
+                        <SatisfactionIconImage satisfaction={record.satisfaction} size={32} />
                       </View>
                     </View>
 
@@ -903,11 +901,7 @@ export default function CalendarScreen() {
                             isSelected && styles.editCategoryButtonSelected,
                             pressed && styles.buttonPressed,
                           ]}>
-                          <MaterialCommunityIcons
-                            color={isSelected ? BrandColors.onPrimary : '#747A72'}
-                            name={item.icon}
-                            size={17}
-                          />
+                          <CategoryIconImage icon={item.icon} size={30} />
                           <Text
                             style={[
                               styles.editCategoryText,
@@ -939,7 +933,7 @@ export default function CalendarScreen() {
                             isSelected && styles.editSatisfactionButtonSelected,
                             pressed && styles.buttonPressed,
                           ]}>
-                          <Text style={styles.editSatisfactionEmoji}>{item}</Text>
+                          <SatisfactionIconImage satisfaction={item} size={34} />
                         </Pressable>
                       );
                     })}

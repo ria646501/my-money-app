@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { BrandColors } from '@/constants/theme';
+import { CategoryIconImage } from '@/components/category-icon-image';
 import {
   CATEGORY_ICON_OPTIONS,
   CategoryIconName,
@@ -135,7 +136,7 @@ function DraggableCategoryRow({
         <MaterialCommunityIcons color={BrandColors.textMuted} name="drag-vertical" size={23} />
       </View>
       <View style={styles.categoryIconCircle}>
-        <MaterialCommunityIcons color={BrandColors.primary} name={category.icon} size={21} />
+        <CategoryIconImage icon={category.icon} size={30} />
       </View>
       <Text numberOfLines={1} style={styles.categoryName}>
         {category.name}
@@ -342,11 +343,7 @@ export function CategoryManagerModal({
                           styles.iconButton,
                           isSelected && styles.iconButtonSelected,
                         ]}>
-                        <MaterialCommunityIcons
-                          color={isSelected ? BrandColors.primary : '#858193'}
-                          name={item}
-                          size={22}
-                        />
+                        <CategoryIconImage icon={item} size={34} />
                       </Pressable>
                     );
                   })}

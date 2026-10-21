@@ -9,7 +9,7 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: BrandColors.primary,
+        tabBarActiveTintColor: '#EF7FAA',
         tabBarInactiveTintColor: BrandColors.textMuted,
         tabBarLabelStyle: {
           fontSize: 11,
@@ -44,6 +44,13 @@ export default function TabLayout() {
         options={{
           title: '통계',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="chart.bar.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="more"
+        options={{
+          title: '더보기',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="ellipsis" color={color} />,
         }}
       />
     </Tabs>

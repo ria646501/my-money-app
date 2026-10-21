@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { BrandColors } from '@/constants/theme';
+import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
 import {
   DAILY_SATISFACTIONS_STORAGE_KEY,
   DailySatisfactions,
@@ -320,7 +321,9 @@ export default function StatisticsScreen() {
               return (
                 <View key={dateKey} style={styles.emotionDayCell}>
                   <Text style={styles.emotionDayNumber}>{day}</Text>
-                  {satisfaction ? <Text style={styles.emotionEmoji}>{satisfaction}</Text> : null}
+                  {satisfaction ? (
+                    <SatisfactionIconImage satisfaction={satisfaction} size={22} />
+                  ) : null}
                 </View>
               );
             })}

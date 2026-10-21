@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -18,11 +18,13 @@ import {
 import {
   CategoryManagerModal,
 } from '@/components/category-manager-modal';
+import { CategoryIconImage } from '@/components/category-icon-image';
 import {
   ExpenseEditValues,
   ExpenseRecordEditor,
 } from '@/components/expense-record-editor';
-import { HomeCharacterSlot } from '@/components/home-character-slot';
+import { CharacterRoom } from '@/components/character-room';
+import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
 import { TimePickerModal } from '@/components/time-picker-modal';
 import { BrandColors } from '@/constants/theme';
 import {
@@ -46,6 +48,7 @@ import {
   createInitialGrowthState,
   getNextStageProgress,
   GrowthState,
+  RewardResult,
 } from '@/lib/growth';
 import {
   grantAttendanceReward,
@@ -61,12 +64,25 @@ import {
 } from '@/lib/categories';
 
 const SATISFACTION_BACKGROUNDS: Record<Satisfaction, string> = {
-  '😫': '#FFF0F2',
-  '😕': '#FFF6EC',
-  '😐': '#FFF9E8',
-  '🙂': '#EFFAF3',
-  '😍': '#F2EEFF',
+  '😫': '#EAF3FF',
+  '😕': '#FFF0F7',
+  '😐': '#FFF9DE',
+  '🙂': '#FFF1E2',
+  '😍': '#FFEFF7',
 };
+
+const HOME_COLORS = {
+  background: '#FFF8F0',
+  border: '#F2DEE2',
+  card: '#FFFDF9',
+  cardSoft: '#FFF5F5',
+  ink: '#5A456A',
+  muted: '#9E8C9A',
+  pink: '#EF7FAA',
+  pinkPressed: '#DF6595',
+  pinkSoft: '#FFE7F0',
+  lavenderSoft: '#F2EDFF',
+} as const;
 
 export default function HomeScreen() {
   const [amount, setAmount] = useState('');
@@ -89,17 +105,8 @@ export default function HomeScreen() {
     createInitialGrowthState()
   );
   const [isGrowthReady, setIsGrowthReady] = useState(false);
+  const [rewardEffect, setRewardEffect] = useState<{ exp: number; points: number } | null>(null);
   const nextRecordId = useRef(0);
-
-  const today = useMemo(
-    () =>
-      new Intl.DateTimeFormat('ko-KR', {
-        month: 'long',
-        day: 'numeric',
-        weekday: 'long',
-      }).format(new Date()),
-    []
-  );
 
   const todayDateKey = getLocalDateKey(new Date());
   const todayRecords = records
@@ -118,6 +125,21 @@ export default function HomeScreen() {
   const growthProgress = getNextStageProgress(growthState.totalExp);
   const didAttendToday = growthState.attendanceHistory[todayDateKey] !== undefined;
 
+  const showRewardEffect = (result: RewardResult) => {
+    if (result.granted && (result.grantedExp > 0 || result.grantedPoints > 0)) {
+      setRewardEffect({ exp: result.grantedExp, points: result.grantedPoints });
+    }
+  };
+
+  useEffect(() => {
+    if (rewardEffect === null) {
+      return;
+    }
+
+    const timeout = setTimeout(() => setRewardEffect(null), 1_800);
+    return () => clearTimeout(timeout);
+  }, [rewardEffect]);
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -128,6 +150,7 @@ export default function HomeScreen() {
 
           if (isActive) {
             setGrowthState(result.state);
+            showRewardEffect(result);
           }
         } catch (error) {
           console.error('출석 보상을 저장하지 못했습니다.', error);
@@ -372,6 +395,7 @@ export default function HomeScreen() {
         targetDate: localDate,
       });
       setGrowthState(rewardResult.state);
+      showRewardEffect(rewardResult);
     } catch (error) {
       console.error('소비 기록 보상을 저장하지 못했습니다.', error);
     }
@@ -489,6 +513,7 @@ export default function HomeScreen() {
       try {
         const rewardResult = await grantDailyReflectionReward({ targetDate: todayDateKey });
         setGrowthState(rewardResult.state);
+        showRewardEffect(rewardResult);
       } catch (error) {
         console.error('하루 회고 보상을 저장하지 못했습니다.', error);
       }
@@ -513,54 +538,22 @@ export default function HomeScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <View style={styles.menuMark}>
-              <View style={styles.menuLine} />
-              <View style={styles.menuLine} />
-              <View style={styles.menuLine} />
-            </View>
+            <Text style={styles.headerSparkle}>✧</Text>
             <View style={styles.headerCopy}>
-              <Text style={styles.title}>재윤님 👋</Text>
-              <Text style={styles.date}>오늘도 좋은 하루예요! · {today}</Text>
+              <Text style={styles.title}>소비 다이어리</Text>
             </View>
+            <Text style={styles.headerSparkle}>✦</Text>
           </View>
 
-          <HomeCharacterSlot />
+          <CharacterRoom
+            progress={growthProgress}
+            rewardEffect={rewardEffect}
+          />
 
-          <View style={styles.growthCard}>
-            <View style={styles.growthHeader}>
-              <View>
-                <Text style={styles.growthStageLabel}>현재 성장 단계</Text>
-                <Text style={styles.growthStageName}>{growthProgress.stage.name}</Text>
-              </View>
-              <View style={styles.growthPointBadge}>
-                <MaterialCommunityIcons color={BrandColors.primary} name="star-four-points" size={15} />
-                <Text style={styles.growthPointText}>{growthState.totalPoints}P</Text>
-              </View>
-            </View>
-
-            <View style={styles.growthExpRow}>
-              <Text style={styles.growthExpText}>{growthState.totalExp} EXP</Text>
-              <Text style={styles.growthNextText}>
-                {growthProgress.nextStage
-                  ? `다음 성장까지 ${growthProgress.expToNextStage} EXP`
-                  : '최종 성장 단계'}
-              </Text>
-            </View>
-            <View style={styles.growthProgressTrack}>
-              <View
-                style={[
-                  styles.growthProgressFill,
-                  { width: `${Math.round(growthProgress.progress * 100)}%` },
-                ]}
-              />
-            </View>
-
-            <View style={styles.growthMetaRow}>
-              <Text style={styles.growthMetaText}>연속 출석 {growthState.currentStreak}일</Text>
-              <Text style={styles.growthAttendanceText}>
-                {isGrowthReady && didAttendToday ? '오늘 출석 완료 ✓' : '출석 확인 중'}
-              </Text>
-            </View>
+          <View style={styles.attendancePill}>
+            <Text style={styles.attendanceText}>
+              {isGrowthReady && didAttendToday ? '✓ 오늘 출석' : '출석 확인 중'}
+            </Text>
           </View>
 
           <View style={styles.entryArea}>
@@ -607,11 +600,7 @@ export default function HomeScreen() {
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
-                        <MaterialCommunityIcons
-                          color={isSelected ? BrandColors.primary : '#8E93A8'}
-                          name={item.icon}
-                          size={21}
-                        />
+                        <CategoryIconImage icon={item.icon} size={30} />
                         <Text
                           style={[
                             styles.categoryText,
@@ -655,7 +644,7 @@ export default function HomeScreen() {
                           isSelected && styles.satisfactionButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
-                        <Text style={styles.emoji}>{item}</Text>
+                        <SatisfactionIconImage satisfaction={item} size={58} />
                       </Pressable>
                     );
                   })}
@@ -677,7 +666,7 @@ export default function HomeScreen() {
                 </View>
 
                 <View style={[styles.section, styles.compactSection]}>
-                  <Text style={styles.label}>언제 썼어?</Text>
+                  <Text style={styles.label}>소비 시간</Text>
                   <Pressable
                     accessibilityLabel={`소비 시간 ${formatTimeSelection(newRecordTime)}`}
                     accessibilityRole="button"
@@ -715,12 +704,12 @@ export default function HomeScreen() {
           <View style={styles.recordsSection}>
             <View style={styles.recordsHeader}>
               <View style={styles.recordsTitleGroup}>
-                <Text style={styles.recordsTitle}>오늘의 기록</Text>
+                <Text style={styles.recordsTitle}>✧ 오늘의 기록</Text>
                 <View style={styles.recordCountBadge}>
                   <Text style={styles.recordCountText}>{todayRecords.length}건</Text>
                 </View>
               </View>
-              <Text style={styles.totalAmount}>₩ {totalAmount.toLocaleString('ko-KR')}</Text>
+              <Text style={styles.totalAmount}>₩{totalAmount.toLocaleString('ko-KR')}</Text>
             </View>
 
             {todayRecords.length === 0 ? (
@@ -740,11 +729,7 @@ export default function HomeScreen() {
                       pressed && styles.recordItemPressed,
                     ]}>
                     <View style={styles.recordCategoryMark}>
-                      <MaterialCommunityIcons
-                        color="#858BA1"
-                        name={record.categoryIcon}
-                        size={19}
-                      />
+                      <CategoryIconImage icon={record.categoryIcon} size={31} />
                     </View>
                     <View style={styles.recordInfo}>
                       <Text style={styles.recordCategory}>{record.category}</Text>
@@ -763,7 +748,7 @@ export default function HomeScreen() {
                       </Text>
                     </View>
                     <View style={styles.recordMood}>
-                      <Text style={styles.recordSatisfaction}>{record.satisfaction}</Text>
+                      <SatisfactionIconImage satisfaction={record.satisfaction} size={58} />
                     </View>
                     <Text style={styles.recordChevron}>›</Text>
                   </Pressable>
@@ -774,8 +759,8 @@ export default function HomeScreen() {
             {todayRecords.length > 0 && isDailySatisfactionReady ? (
               <View style={styles.dailyReview}>
                 <View style={styles.dailyReviewCopy}>
-                  <Text style={styles.dailyReviewTitle}>오늘의 소비는 어땠어?</Text>
-                  <Text style={styles.dailyReviewCaption}>하루를 한마디로 기록해봐요</Text>
+                  <Text style={styles.dailyReviewTitle}>오늘 하루 소비는 어땠어? ✧</Text>
+                  <Text style={styles.dailyReviewCaption}>하루 전체 소비 만족도를 기록해봐요</Text>
                 </View>
                 <View style={styles.dailySatisfactionRow}>
                   {SATISFACTIONS.map((item) => {
@@ -794,11 +779,12 @@ export default function HomeScreen() {
                           isSelected && styles.dailySatisfactionButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
-                        <Text style={styles.dailySatisfactionEmoji}>{item}</Text>
+                        <SatisfactionIconImage satisfaction={item} size={58} />
                       </Pressable>
                     );
                   })}
                 </View>
+                <Text style={styles.dailyReviewFooter}>하루를 한마디로 기록해봐요</Text>
               </View>
             ) : null}
           </View>
@@ -836,126 +822,104 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BrandColors.background,
+    backgroundColor: HOME_COLORS.background,
   },
   keyboardView: {
     flex: 1,
   },
   content: {
     flexGrow: 1,
-    paddingBottom: 24,
-    paddingHorizontal: 18,
-    paddingTop: 12,
+    paddingBottom: 30,
+    paddingHorizontal: 12,
+    paddingTop: 8,
   },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
-    minHeight: 52,
-    paddingHorizontal: 2,
-  },
-  growthCard: {
-    backgroundColor: BrandColors.surface,
-    borderColor: BrandColors.border,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginBottom: 14,
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-  },
-  growthHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
     justifyContent: 'space-between',
+    minHeight: 76,
+    paddingHorizontal: 3,
   },
-  growthStageLabel: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '700' },
-  growthStageName: { color: BrandColors.text, fontSize: 18, fontWeight: '900', marginTop: 2 },
-  growthPointBadge: {
-    alignItems: 'center',
-    backgroundColor: BrandColors.primarySoft,
-    borderRadius: 14,
-    flexDirection: 'row',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  growthPointText: { color: BrandColors.primary, fontSize: 13, fontWeight: '800' },
-  growthExpRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 11,
-  },
-  growthExpText: { color: BrandColors.text, fontSize: 12, fontWeight: '800' },
-  growthNextText: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '600' },
-  growthProgressTrack: {
-    backgroundColor: BrandColors.surfaceSoft,
-    borderRadius: 5,
-    height: 8,
-    marginTop: 7,
-    overflow: 'hidden',
-  },
-  growthProgressFill: {
-    backgroundColor: BrandColors.primary,
-    borderRadius: 5,
-    height: '100%',
-  },
-  growthMetaRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 9,
-  },
-  growthMetaText: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '700' },
-  growthAttendanceText: { color: BrandColors.primary, fontSize: 10, fontWeight: '800' },
-  menuMark: {
-    gap: 5,
-    marginRight: 16,
-    width: 28,
-  },
-  menuLine: {
-    backgroundColor: BrandColors.text,
-    borderRadius: 2,
-    height: 2,
-    width: 27,
+  headerSparkle: {
+    color: '#6D5A88',
+    fontSize: 40,
+    fontWeight: '800',
+    width: 34,
   },
   headerCopy: {
+    alignItems: 'center',
     flex: 1,
   },
   title: {
-    color: BrandColors.text,
-    fontSize: 19,
-    fontWeight: '800',
+    color: HOME_COLORS.ink,
+    fontSize: 32,
+    fontWeight: '900',
     letterSpacing: -0.5,
-    lineHeight: 24,
   },
   date: {
-    color: BrandColors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 1,
+    color: HOME_COLORS.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  attendancePill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFF4FA',
+    borderColor: '#F6CFE1',
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 10,
+    marginLeft: 1,
+    marginTop: -2,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  attendanceText: { color: HOME_COLORS.pink, fontSize: 18, fontWeight: '800' },
+  dailySummaryCard: {
+    alignItems: 'center',
+    backgroundColor: HOME_COLORS.card,
+    borderColor: HOME_COLORS.border,
+    borderRadius: 15,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+  },
+  dailySummaryLabel: {
+    color: HOME_COLORS.muted,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  dailySummaryAmount: {
+    color: HOME_COLORS.ink,
+    fontSize: 19,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  dailySummaryChevron: {
+    color: '#7D6E96',
+    fontSize: 25,
   },
   entryArea: {
-    backgroundColor: BrandColors.surface,
-    borderColor: '#FFFFFF',
-    borderRadius: 22,
+    backgroundColor: HOME_COLORS.card,
+    borderColor: HOME_COLORS.border,
+    borderRadius: 18,
     borderWidth: 1,
     flexShrink: 0,
     marginTop: -4,
-    padding: 15,
-    shadowColor: '#493C7A',
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.07,
-    shadowRadius: 18,
+    padding: 12,
   },
   form: {
-    gap: 15,
+    gap: 13,
   },
   section: {
     gap: 8,
   },
   cardTitle: {
-    color: BrandColors.text,
-    fontSize: 18,
+    color: HOME_COLORS.ink,
+    fontSize: 28,
     fontWeight: '800',
     letterSpacing: -0.3,
   },
@@ -965,184 +929,173 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   directInputBadge: {
-    backgroundColor: BrandColors.surfaceSoft,
+    backgroundColor: HOME_COLORS.lavenderSoft,
     borderRadius: 15,
     paddingHorizontal: 11,
     paddingVertical: 7,
   },
   directInputText: {
-    color: BrandColors.textMuted,
-    fontSize: 11,
+    color: '#7D6E96',
+    fontSize: 20,
     fontWeight: '700',
   },
   label: {
-    color: BrandColors.text,
-    fontSize: 15,
+    color: HOME_COLORS.ink,
+    fontSize: 24,
     fontWeight: '800',
   },
   amountInputContainer: {
     alignItems: 'center',
-    backgroundColor: BrandColors.surfaceSoft,
-    borderColor: '#F0EDF7',
-    borderRadius: 18,
+    backgroundColor: '#FFF3F7',
+    borderColor: '#F9DCE8',
+    borderRadius: 9,
     borderWidth: 1,
     flexDirection: 'row',
-    minHeight: 76,
-    paddingHorizontal: 18,
+    minHeight: 82,
+    paddingHorizontal: 12,
   },
   wonSymbol: {
-    color: '#B1ACBE',
-    fontSize: 26,
+    color: '#D59AB3',
+    fontSize: 42,
     fontWeight: '700',
     marginRight: 10,
   },
   amountInput: {
-    color: BrandColors.text,
+    color: HOME_COLORS.ink,
     flex: 1,
-    fontSize: 38,
+    fontSize: 58,
     fontWeight: '800',
     letterSpacing: -1,
     paddingVertical: 8,
   },
   optionRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
     paddingRight: 3,
   },
   categoryButton: {
     alignItems: 'center',
-    backgroundColor: '#F7F5FB',
-    borderColor: '#F3F0F8',
-    borderRadius: 16,
+    backgroundColor: '#FFF7F8',
+    borderColor: '#F7E6EC',
+    borderRadius: 8,
     borderWidth: 1,
-    height: 68,
+    height: 92,
     justifyContent: 'center',
-    paddingHorizontal: 7,
-    paddingVertical: 7,
-    width: 68,
+    paddingHorizontal: 3,
+    paddingVertical: 5,
+    width: 78,
   },
   categoryButtonSelected: {
-    backgroundColor: BrandColors.primarySoft,
-    borderColor: BrandColors.primary,
+    backgroundColor: HOME_COLORS.pinkSoft,
+    borderColor: HOME_COLORS.pink,
   },
   categoryManageButton: {
-    borderColor: BrandColors.primarySoft,
+    borderColor: '#E4D7FD',
   },
   categoryText: {
-    color: BrandColors.textMuted,
-    fontSize: 12,
+    color: HOME_COLORS.muted,
+    fontSize: 16,
     fontWeight: '700',
     marginTop: 4,
   },
   categoryTextSelected: {
-    color: BrandColors.primary,
+    color: HOME_COLORS.pink,
   },
   categoryManageText: {
-    color: BrandColors.primary,
+    color: '#8566DC',
   },
   satisfactionRow: {
     flexDirection: 'row',
-    gap: 7,
+    gap: 1,
   },
   satisfactionButton: {
     alignItems: 'center',
     backgroundColor: BrandColors.surfaceSoft,
-    borderColor: '#EFEBF6',
-    borderRadius: 20,
+    borderColor: '#F2DFE6',
+    borderRadius: 8,
     borderWidth: 1,
     flex: 1,
-    height: 42,
+    height: 70,
     justifyContent: 'center',
   },
   satisfactionButtonSelected: {
-    borderColor: BrandColors.primary,
+    borderColor: HOME_COLORS.pink,
     borderWidth: 1.5,
-  },
-  emoji: {
-    fontSize: 21,
   },
   compactFieldsRow: {
     flexDirection: 'row',
-    gap: 10,
     flexWrap: 'wrap',
+    gap: 10,
   },
   compactSection: {
     flex: 1,
     minWidth: 138,
   },
   memoInput: {
-    backgroundColor: '#F7F5FB',
-    borderColor: '#F1EDF7',
-    borderRadius: 13,
+    backgroundColor: '#FFF7F8',
+    borderColor: '#F4E2E8',
+    borderRadius: 9,
     borderWidth: 1,
-    color: BrandColors.text,
-    fontSize: 14,
-    height: 45,
-    paddingHorizontal: 13,
+    color: HOME_COLORS.ink,
+    fontSize: 22,
+    height: 64,
+    paddingHorizontal: 10,
     paddingVertical: 10,
   },
   timeSelector: {
     alignItems: 'center',
-    backgroundColor: '#F7F5FB',
-    borderColor: '#F1EDF7',
-    borderRadius: 13,
+    backgroundColor: '#FFF7F8',
+    borderColor: '#F4E2E8',
+    borderRadius: 8,
     borderWidth: 1,
     flexDirection: 'row',
-    height: 45,
+    height: 64,
     justifyContent: 'space-between',
-    paddingHorizontal: 13,
+    paddingHorizontal: 10,
   },
   timeSelectorText: {
-    color: BrandColors.text,
+    color: HOME_COLORS.ink,
     flexShrink: 1,
-    fontSize: 13,
+    fontSize: 20,
     fontWeight: '600',
   },
   timeSelectorArrow: {
-    color: BrandColors.primary,
-    fontSize: 24,
-    lineHeight: 26,
+    color: HOME_COLORS.pink,
+    fontSize: 38,
+    lineHeight: 40,
   },
   submitButton: {
     alignItems: 'center',
-    backgroundColor: BrandColors.primary,
-    borderRadius: 16,
+    backgroundColor: HOME_COLORS.pink,
+    borderRadius: 10,
     justifyContent: 'center',
     marginTop: 17,
-    minHeight: 55,
+    minHeight: 68,
   },
   submitButtonDisabled: {
-    backgroundColor: '#E9E6EF',
+    backgroundColor: '#F1DFE5',
   },
   submitButtonPressed: {
-    backgroundColor: BrandColors.primaryPressed,
+    backgroundColor: HOME_COLORS.pinkPressed,
     transform: [{ scale: 0.99 }],
   },
   submitButtonText: {
     color: BrandColors.onPrimary,
-    fontSize: 17,
+    fontSize: 28,
     fontWeight: '800',
   },
   submitButtonTextDisabled: {
     color: '#A5A1AE',
   },
   recordsSection: {
-    backgroundColor: BrandColors.surface,
-    borderColor: '#FFFFFF',
-    borderRadius: 24,
-    borderWidth: 1,
-    marginTop: 14,
-    padding: 15,
-    shadowColor: '#493C7A',
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.05,
-    shadowRadius: 18,
+    marginTop: 16,
   },
   recordsHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 9,
+    paddingHorizontal: 2,
   },
   recordsTitleGroup: {
     alignItems: 'center',
@@ -1151,55 +1104,59 @@ const styles = StyleSheet.create({
   },
   recordsTitle: {
     color: BrandColors.text,
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 26,
+    fontWeight: '900',
   },
   recordCountBadge: {
-    backgroundColor: BrandColors.primarySoft,
-    borderRadius: 9,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    backgroundColor: HOME_COLORS.pinkSoft,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   recordCountText: {
-    color: BrandColors.primary,
-    fontSize: 11,
+    color: HOME_COLORS.pink,
+    fontSize: 20,
     fontWeight: '800',
   },
   totalAmount: {
-    color: BrandColors.primary,
-    fontSize: 17,
-    fontWeight: '800',
+    color: HOME_COLORS.pink,
+    fontSize: 27,
+    fontWeight: '900',
+    letterSpacing: -0.8,
   },
   emptyState: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: BrandColors.border,
-    borderRadius: 12,
+    backgroundColor: HOME_COLORS.card,
+    borderColor: HOME_COLORS.border,
+    borderRadius: 15,
     borderWidth: 1,
     paddingVertical: 22,
   },
   emptyStateText: {
-    color: BrandColors.textMuted,
-    fontSize: 14,
+    color: HOME_COLORS.muted,
+    fontSize: 28,
   },
   recordsList: {
-    gap: 0,
+    gap: 8,
   },
   recordItem: {
     alignItems: 'center',
-    borderBottomColor: '#F0EDF5',
-    borderBottomWidth: 1,
+    backgroundColor: HOME_COLORS.card,
+    borderColor: HOME_COLORS.border,
+    borderRadius: 18,
+    borderWidth: 1,
     flexDirection: 'row',
-    minHeight: 65,
-    paddingVertical: 8,
+    minHeight: 94,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
   },
   recordItemPressed: {
-    backgroundColor: BrandColors.surfaceSoft,
+    backgroundColor: '#FFF5F7',
   },
   recordCategoryMark: {
     alignItems: 'center',
-    backgroundColor: BrandColors.primarySoft,
-    borderRadius: 18,
+    backgroundColor: HOME_COLORS.lavenderSoft,
+    borderRadius: 17,
     height: 36,
     justifyContent: 'center',
     marginRight: 10,
@@ -1210,8 +1167,8 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   recordCategory: {
-    color: BrandColors.text,
-    fontSize: 13,
+    color: HOME_COLORS.ink,
+    fontSize: 24,
     fontWeight: '800',
   },
   recordFigures: {
@@ -1220,81 +1177,80 @@ const styles = StyleSheet.create({
     maxWidth: 100,
   },
   recordAmount: {
-    color: BrandColors.text,
-    fontSize: 13,
+    color: HOME_COLORS.ink,
+    fontSize: 22,
     fontWeight: '800',
     marginTop: 3,
   },
   recordMood: {
     alignItems: 'center',
-    backgroundColor: BrandColors.surfaceSoft,
-    borderRadius: 16,
-    height: 32,
+    height: 58,
     justifyContent: 'center',
     marginLeft: 8,
-    width: 32,
-  },
-  recordSatisfaction: {
-    fontSize: 18,
+    width: 58,
   },
   recordMemo: {
-    color: BrandColors.textMuted,
-    fontSize: 12,
+    color: HOME_COLORS.muted,
+    fontSize: 20,
     marginTop: 3,
   },
   recordMemoEmpty: {
     color: '#B1ADBB',
-    fontSize: 12,
+    fontSize: 20,
     marginTop: 3,
   },
   recordTime: {
-    color: BrandColors.textMuted,
-    fontSize: 11,
+    color: HOME_COLORS.muted,
+    fontSize: 18,
   },
   recordChevron: {
     color: '#C3BDCE',
-    fontSize: 22,
+    fontSize: 36,
     marginLeft: 4,
   },
   dailyReview: {
-    backgroundColor: BrandColors.primarySoft,
+    backgroundColor: '#F1E7FF',
+    borderColor: '#F6D4E1',
     borderRadius: 16,
-    marginTop: 14,
+    borderWidth: 1,
+    marginTop: 12,
     padding: 13,
   },
   dailyReviewCopy: {
     marginBottom: 10,
   },
   dailyReviewTitle: {
-    color: BrandColors.text,
-    fontSize: 14,
+    color: HOME_COLORS.ink,
+    fontSize: 26,
     fontWeight: '800',
   },
   dailyReviewCaption: {
-    color: BrandColors.textMuted,
-    fontSize: 11,
+    color: HOME_COLORS.muted,
+    fontSize: 20,
     marginTop: 3,
   },
   dailySatisfactionRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 1,
   },
   dailySatisfactionButton: {
     alignItems: 'center',
     backgroundColor: '#FFFFFFB8',
-    borderColor: '#FFFFFF',
+    borderColor: '#F5DDE5',
     borderRadius: 12,
     borderWidth: 1,
     flex: 1,
-    height: 44,
+    height: 70,
     justifyContent: 'center',
   },
   dailySatisfactionButtonSelected: {
-    borderColor: BrandColors.primary,
+    borderColor: HOME_COLORS.pink,
     borderWidth: 1.5,
   },
-  dailySatisfactionEmoji: {
-    fontSize: 21,
+  dailyReviewFooter: {
+    color: HOME_COLORS.muted,
+    fontSize: 18,
+    marginTop: 8,
   },
   buttonPressed: {
     opacity: 0.75,
