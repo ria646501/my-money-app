@@ -91,8 +91,8 @@ function Summary({ emphasized = false, label, value }: { emphasized?: boolean; l
 }
 
 const styles = StyleSheet.create({
-  backdrop: { backgroundColor: 'rgba(48, 36, 61, 0.42)', flex: 1, justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#FFF9EF', borderTopLeftRadius: 26, borderTopRightRadius: 26, height: '88%', overflow: 'hidden' },
+  backdrop: { alignItems: 'center', backgroundColor: 'rgba(48, 36, 61, 0.42)', flex: 1, justifyContent: 'flex-end' },
+  sheet: { alignSelf: 'center', backgroundColor: '#FFF9EF', borderTopLeftRadius: 26, borderTopRightRadius: 26, height: '88%', maxHeight: 780, maxWidth: 430, overflow: 'hidden', width: '100%' },
   handle: { alignSelf: 'center', backgroundColor: '#D8CDDB', borderRadius: 4, height: 5, marginTop: 10, width: 42 },
   header: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 52, paddingHorizontal: 18 },
   headerSpacer: { width: 38 }, headerTitle: { color: '#302D55', fontSize: 20, fontWeight: '900' }, closeButton: { alignItems: 'center', height: 38, justifyContent: 'center', width: 38 },
