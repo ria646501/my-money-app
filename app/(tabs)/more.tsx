@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CharacterRoomLayer, CharacterVisual } from '@/components/character-visual';
 import { getLocalDateKey } from '@/lib/expense-record';
@@ -13,14 +13,6 @@ import {
   GrowthState,
 } from '@/lib/growth';
 import { loadGrowthState } from '@/lib/growth-storage';
-
-const CHARACTER_IMAGES = {
-  EGG: require('@/assets/characters/egg.png'),
-  CHICK: require('@/assets/characters/chick.png'),
-  GROWING_CHICKEN: require('@/assets/characters/juvenile.png'),
-  CHICKEN: require('@/assets/characters/chicken.png'),
-  MYSTERY: require('@/assets/characters/chicken.png'),
-} as const;
 
 type MorePage = 'growth' | 'attendance';
 
@@ -90,7 +82,7 @@ function GrowthScreen({ growthState, onOpenAttendance }: { growthState: GrowthSt
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <ScreenHeader title="캐릭터 성장" />
         <View style={styles.roomCard}>
-          <CharacterRoomLayer interiorOnly style={styles.roomBackground} />
+          <CharacterRoomLayer growthRoom style={styles.roomBackground} />
           <View style={styles.growthBubble}><Text style={styles.growthBubbleText}>조금씩 자라고 있어!</Text></View>
           <CharacterVisual
             maxSize={145}
@@ -106,6 +98,14 @@ function GrowthScreen({ growthState, onOpenAttendance }: { growthState: GrowthSt
         <View style={styles.expHeader}>
           <Text style={styles.expLabel}>EXP</Text>
           <Text style={styles.expValue}>{progress.currentExpInStage} / {stageRange}</Text>
+        </View>
+        <View style={styles.expTrack}>
+          <View
+            style={[
+              styles.expFill,
+              { width: `${Math.round(progress.progress * 100)}%` },
+            ]}
+          />
         </View>
 
         {progress.nextStage ? (
@@ -195,7 +195,11 @@ function AttendanceScreen({ growthState, onBack }: { growthState: GrowthState; o
           <View style={styles.pointPill}><Text style={styles.pointPillText}>{growthState.totalPoints} P</Text></View>
         </View>
         <View style={styles.streakCard}>
-          <Image resizeMode="contain" source={CHARACTER_IMAGES[getCharacterStage(growthState.totalExp).id]} style={styles.streakCharacter} />
+          <CharacterVisual
+            maxSize={82}
+            stageId={getCharacterStage(growthState.totalExp).id}
+            style={styles.streakCharacter}
+          />
           <View style={styles.streakCopy}>
             <Text style={styles.streakTitle}>
               {growthState.currentStreak > 0
@@ -271,6 +275,8 @@ const styles = StyleSheet.create({
   expHeader: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   expLabel: { color: '#302D55', fontSize: 12, fontWeight: '900' },
   expValue: { color: '#302D55', fontSize: 12, fontWeight: '700' },
+  expTrack: { backgroundColor: '#F0E8F3', borderRadius: 7, height: 10, marginTop: 7, overflow: 'hidden' },
+  expFill: { backgroundColor: '#F277A7', borderRadius: 7, height: '100%' },
   nextStageCard: { alignItems: 'center', backgroundColor: '#FFFCFA', borderColor: '#F4BDD7', borderRadius: 17, borderWidth: 1, flexDirection: 'row', marginTop: 14, minHeight: 68, paddingHorizontal: 12 },
   nextStageCopy: { flex: 1, marginLeft: 10 },
   nextStageTitle: { color: '#302D55', fontSize: 12, fontWeight: '900' },

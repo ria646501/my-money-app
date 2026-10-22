@@ -1,7 +1,9 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Animated, Easing, StyleSheet, Text, View, ViewStyle } from 'react-native';
 
 import { CharacterRoomLayer, CharacterVisual } from '@/components/character-visual';
 import { CharacterStage, StageProgress } from '@/lib/growth';
+import { RewardFeedback, RewardFeedbackAnchor } from '@/lib/reward-feedback';
 
 const LEVEL_BY_STAGE: Record<CharacterStage['id'], number> = {
   EGG: 1,
@@ -11,22 +13,106 @@ const LEVEL_BY_STAGE: Record<CharacterStage['id'], number> = {
   MYSTERY: 5,
 };
 
-type RewardEffect = {
-  exp: number;
-  points: number;
-} | null;
-
 type CharacterRoomProps = {
+  onRewardEffectComplete?: (id: string) => void;
   progress: StageProgress;
-  rewardEffect?: RewardEffect;
+  rewardEffects?: RewardFeedback[];
 };
 
 const SPEECH_TEXT = '오늘도\n기록해볼까?';
 
-export function CharacterRoom({ progress, rewardEffect = null }: CharacterRoomProps) {
-  const totalExp = progress.stage.minimumExp + progress.currentExpInStage;
-  const requiredExp = progress.nextStage?.minimumExp ?? Math.max(1, totalExp);
-  const displayedProgress = Math.min(1, totalExp / requiredExp);
+const REWARD_ANCHORS: Record<RewardFeedbackAnchor, ViewStyle> = {
+  'left-top': { left: '20%', top: '28%' },
+  'right-top': { right: '18%', top: '29%' },
+  left: { left: '17%', top: '43%' },
+  right: { right: '16%', top: '42%' },
+  'upper-center': { left: '38%', top: '23%' },
+};
+
+function FloatingReward({
+  feedback,
+  onComplete,
+}: {
+  feedback: RewardFeedback;
+  onComplete?: (id: string) => void;
+}) {
+  const [expProgress] = useState(() => new Animated.Value(0));
+  const [pointProgress] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    const createAnimation = (value: Animated.Value, delay: number) =>
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(value, {
+          duration: 1_500,
+          easing: Easing.out(Easing.cubic),
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+      ]);
+    const animations = [
+      ...(feedback.exp > 0 ? [createAnimation(expProgress, 0)] : []),
+      ...(feedback.points > 0 ? [createAnimation(pointProgress, 130)] : []),
+    ];
+    const animation = Animated.parallel(animations);
+
+    animation.start(({ finished }) => {
+      if (finished) {
+        onComplete?.(feedback.id);
+      }
+    });
+
+    return () => animation.stop();
+  }, [expProgress, feedback.exp, feedback.id, feedback.points, onComplete, pointProgress]);
+
+  const animatedStyle = (progress: Animated.Value) => ({
+    opacity: progress.interpolate({
+      inputRange: [0, 0.15, 0.72, 1],
+      outputRange: [0, 1, 1, 0],
+    }),
+    transform: [
+      {
+        scale: progress.interpolate({
+          inputRange: [0, 0.18, 0.34, 1],
+          outputRange: [0.7, 1.1, 1, 1],
+        }),
+      },
+      {
+        translateY: progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [8, -28],
+        }),
+      },
+    ],
+  });
+
+  return (
+    <View pointerEvents="none" style={[styles.rewardEffect, REWARD_ANCHORS[feedback.anchor]]}>
+      {feedback.exp > 0 ? (
+        <Animated.Text style={[styles.rewardExp, animatedStyle(expProgress)]}>
+          +{feedback.exp} EXP
+        </Animated.Text>
+      ) : null}
+      {feedback.points > 0 ? (
+        <Animated.Text style={[styles.rewardPoints, animatedStyle(pointProgress)]}>
+          +{feedback.points}P
+        </Animated.Text>
+      ) : null}
+    </View>
+  );
+}
+
+export function CharacterRoom({
+  onRewardEffectComplete,
+  progress,
+  rewardEffects = [],
+}: CharacterRoomProps) {
+  const requiredExp = progress.nextStage
+    ? progress.nextStage.minimumExp - progress.stage.minimumExp
+    : Math.max(1, progress.currentExpInStage);
+  const displayedProgress = progress.nextStage
+    ? Math.min(1, progress.currentExpInStage / requiredExp)
+    : 1;
 
   return (
     <View accessibilityLabel="캐릭터 방" style={styles.container}>
@@ -47,18 +133,19 @@ export function CharacterRoom({ progress, rewardEffect = null }: CharacterRoomPr
         style={styles.characterImage}
       />
 
-      {rewardEffect ? (
-        <View pointerEvents="none" style={styles.rewardEffect}>
-          {rewardEffect.exp > 0 ? <Text style={styles.rewardExp}>+{rewardEffect.exp} EXP</Text> : null}
-          {rewardEffect.points > 0 ? <Text style={styles.rewardPoints}>+{rewardEffect.points}P</Text> : null}
-        </View>
-      ) : null}
+      {rewardEffects.map((feedback) => (
+        <FloatingReward
+          feedback={feedback}
+          key={feedback.id}
+          onComplete={onRewardEffectComplete}
+        />
+      ))}
 
       <View style={styles.expPanel}>
         <View style={styles.expTrack}>
           <View style={[styles.expFill, { width: `${Math.round(displayedProgress * 100)}%` }]} />
           <Text style={styles.expValue}>
-            {totalExp} / {requiredExp}
+            {progress.currentExpInStage} / {requiredExp}
           </Text>
         </View>
       </View>
@@ -144,9 +231,8 @@ const styles = StyleSheet.create({
   },
   rewardEffect: {
     alignItems: 'center',
-    left: '54%',
     position: 'absolute',
-    top: '25%',
+    zIndex: 4,
   },
   rewardExp: {
     color: '#E96699',

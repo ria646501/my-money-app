@@ -10,6 +10,7 @@ import {
 import { CharacterStage } from '@/lib/growth';
 
 const ROOM_SOURCE = require('@/assets/characters/character-room.png');
+const GROWTH_ROOM_SOURCE = require('@/assets/characters/growth-room-blue.jpg');
 
 const CHARACTER_SOURCES: Record<CharacterStage['id'], ImageSourcePropType> = {
   EGG: require('@/assets/characters/egg.png'),
@@ -32,7 +33,7 @@ const CHARACTER_VISUAL_SCALE: Record<CharacterStage['id'], number> = {
   CHICK: 0.72,
   GROWING_CHICKEN: 0.86,
   CHICKEN: 1,
-  MYSTERY: 1.43,
+  MYSTERY: 1.83,
 };
 
 type CharacterVisualProps = {
@@ -65,20 +66,28 @@ export function CharacterVisual({
 }
 
 type CharacterRoomLayerProps = {
+  growthRoom?: boolean;
   interiorOnly?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
 export function CharacterRoomLayer({
+  growthRoom = false,
   interiorOnly = false,
   style,
 }: CharacterRoomLayerProps) {
   return (
     <View pointerEvents="none" style={[styles.roomLayer, style]}>
       <Image
-        resizeMode="stretch"
-        source={ROOM_SOURCE}
-        style={interiorOnly ? styles.interiorRoomImage : styles.fullRoomImage}
+        resizeMode={growthRoom ? 'cover' : 'stretch'}
+        source={growthRoom ? GROWTH_ROOM_SOURCE : ROOM_SOURCE}
+        style={
+          growthRoom
+            ? styles.growthRoomImage
+            : interiorOnly
+              ? styles.interiorRoomImage
+              : styles.fullRoomImage
+        }
       />
     </View>
   );
@@ -86,6 +95,10 @@ export function CharacterRoomLayer({
 
 const styles = StyleSheet.create({
   fullRoomImage: {
+    height: '100%',
+    width: '100%',
+  },
+  growthRoomImage: {
     height: '100%',
     width: '100%',
   },

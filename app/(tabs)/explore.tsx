@@ -55,6 +55,8 @@ import {
   grantDailyReflectionReward,
   grantExpenseRecordReward,
 } from '@/lib/growth-storage';
+import { recordPendingGrowthCelebration } from '@/lib/growth-celebration';
+import { queueRewardFeedback } from '@/lib/reward-feedback';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
@@ -404,13 +406,15 @@ export default function CalendarScreen() {
       setAddingDateKey(null);
 
       try {
-        await grantExpenseRecordReward({
+        const rewardResult = await grantExpenseRecordReward({
           actionDate: getLocalDateKey(recordedAt),
           grantedAt: recordedAt.toISOString(),
           isFirstRecordOfDate,
           recordId: newRecord.id,
           targetDate: addingDateKey,
         });
+        queueRewardFeedback(rewardResult);
+        await recordPendingGrowthCelebration(rewardResult);
       } catch (error) {
         console.error('선택한 날짜의 소비 기록 보상을 저장하지 못했습니다.', error);
       }
@@ -540,7 +544,9 @@ export default function CalendarScreen() {
 
     if (isFirstReflection) {
       try {
-        await grantDailyReflectionReward({ targetDate: selectedDateKey });
+        const rewardResult = await grantDailyReflectionReward({ targetDate: selectedDateKey });
+        queueRewardFeedback(rewardResult);
+        await recordPendingGrowthCelebration(rewardResult);
       } catch (error) {
         console.error('선택한 날짜의 하루 회고 보상을 저장하지 못했습니다.', error);
       }
@@ -1195,7 +1201,7 @@ const styles = StyleSheet.create({
   },
   monthPickerCloseText: { color: BrandColors.onPrimary, fontSize: 14, fontWeight: '800' },
   dayCell: {
-    height: 104,
+    height: 96,
     padding: 2,
     width: '14.2857%',
   },
@@ -1206,7 +1212,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flex: 1,
     paddingHorizontal: 2,
-    paddingTop: 6,
+    paddingTop: 3,
   },
   todayCell: {
     backgroundColor: BrandColors.primarySoft,
@@ -1240,7 +1246,7 @@ const styles = StyleSheet.create({
     color: '#626960',
     fontSize: 10,
     fontWeight: '600',
-    marginTop: 1,
+    marginTop: 0,
     maxWidth: '100%',
   },
   detailSection: {

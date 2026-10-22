@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -28,6 +28,7 @@ import {
   ExpenseRecordEditor,
 } from '@/components/expense-record-editor';
 import { CharacterRoom } from '@/components/character-room';
+import { GrowthCelebrationModal } from '@/components/growth-celebration-modal';
 import {
   PRIMARY_SATISFACTION_ICON_SIZE,
   SatisfactionIconImage,
@@ -64,6 +65,16 @@ import {
   grantExpenseRecordReward,
   loadGrowthState,
 } from '@/lib/growth-storage';
+import {
+  consumePendingGrowthCelebration,
+  GrowthCelebration,
+  recordPendingGrowthCelebration,
+} from '@/lib/growth-celebration';
+import {
+  consumeRewardFeedback,
+  createRewardFeedback,
+  RewardFeedback,
+} from '@/lib/reward-feedback';
 import {
   CATEGORIES_STORAGE_KEY,
   CATEGORY_CATALOG_VERSION_KEY,
@@ -123,7 +134,8 @@ export default function HomeScreen() {
     createInitialGrowthState()
   );
   const [isGrowthReady, setIsGrowthReady] = useState(false);
-  const [rewardEffect, setRewardEffect] = useState<{ exp: number; points: number } | null>(null);
+  const [rewardEffects, setRewardEffects] = useState<RewardFeedback[]>([]);
+  const [growthCelebration, setGrowthCelebration] = useState<GrowthCelebration | null>(null);
   const nextRecordId = useRef(0);
 
   const todayDateKey = getLocalDateKey(new Date());
@@ -144,19 +156,41 @@ export default function HomeScreen() {
   const didAttendToday = growthState.attendanceHistory[todayDateKey] !== undefined;
 
   const showRewardEffect = (result: RewardResult) => {
-    if (result.granted && (result.grantedExp > 0 || result.grantedPoints > 0)) {
-      setRewardEffect({ exp: result.grantedExp, points: result.grantedPoints });
+    const feedback = createRewardFeedback(result);
+
+    if (feedback !== null) {
+      setRewardEffects((current) => [...current.slice(-2), feedback]);
     }
   };
 
-  useEffect(() => {
-    if (rewardEffect === null) {
-      return;
-    }
+  const showGrowthCelebration = async (result: RewardResult) => {
+    await recordPendingGrowthCelebration(result);
+    const celebration = await consumePendingGrowthCelebration();
 
-    const timeout = setTimeout(() => setRewardEffect(null), 1_800);
-    return () => clearTimeout(timeout);
-  }, [rewardEffect]);
+    if (celebration !== null) {
+      setGrowthCelebration(celebration);
+    }
+  };
+
+  const removeRewardEffect = useCallback((id: string) => {
+    setRewardEffects((current) => current.filter((feedback) => feedback.id !== id));
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      const pendingFeedback = consumeRewardFeedback();
+
+      if (pendingFeedback.length > 0) {
+        setRewardEffects((current) => [...current, ...pendingFeedback].slice(-3));
+      }
+
+      void consumePendingGrowthCelebration().then((celebration) => {
+        if (celebration !== null) {
+          setGrowthCelebration(celebration);
+        }
+      });
+    }, [])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -169,6 +203,7 @@ export default function HomeScreen() {
           if (isActive) {
             setGrowthState(result.state);
             showRewardEffect(result);
+            void showGrowthCelebration(result);
           }
         } catch (error) {
           console.error('출석 보상을 저장하지 못했습니다.', error);
@@ -428,6 +463,7 @@ export default function HomeScreen() {
       });
       setGrowthState(rewardResult.state);
       showRewardEffect(rewardResult);
+      await showGrowthCelebration(rewardResult);
     } catch (error) {
       console.error('소비 기록 보상을 저장하지 못했습니다.', error);
     }
@@ -564,6 +600,7 @@ export default function HomeScreen() {
         const rewardResult = await grantDailyReflectionReward({ targetDate: todayDateKey });
         setGrowthState(rewardResult.state);
         showRewardEffect(rewardResult);
+        await showGrowthCelebration(rewardResult);
       } catch (error) {
         console.error('하루 회고 보상을 저장하지 못했습니다.', error);
       }
@@ -596,8 +633,15 @@ export default function HomeScreen() {
           </View>
 
           <CharacterRoom
+            onRewardEffectComplete={removeRewardEffect}
             progress={growthProgress}
-            rewardEffect={rewardEffect}
+            rewardEffects={rewardEffects}
+          />
+
+          <GrowthCelebrationModal
+            onConfirm={() => setGrowthCelebration(null)}
+            stageId={growthCelebration?.stageId ?? null}
+            totalExp={growthCelebration?.totalExp ?? 0}
           />
 
           <Pressable
@@ -839,7 +883,10 @@ export default function HomeScreen() {
                       </Text>
                     </View>
                     <View style={styles.recordMood}>
-                      <SatisfactionIconImage satisfaction={record.satisfaction} size={58} />
+                      <SatisfactionIconImage
+                        satisfaction={record.satisfaction}
+                        size={PRIMARY_SATISFACTION_ICON_SIZE}
+                      />
                     </View>
                     <Text style={styles.recordChevron}>›</Text>
                   </Pressable>
