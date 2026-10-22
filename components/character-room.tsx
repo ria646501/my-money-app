@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
     width: 14,
   },
   characterImage: {
-    bottom: '16%',
+    bottom: '21%',
     left: '36%',
     position: 'absolute',
   },

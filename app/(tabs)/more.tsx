@@ -1,9 +1,10 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CharacterRoomLayer, CharacterVisual } from '@/components/character-visual';
+import { AttendanceRewardModal } from '@/components/attendance-reward-modal';
 import { getLocalDateKey } from '@/lib/expense-record';
 import {
   createInitialGrowthState,
@@ -14,41 +15,35 @@ import {
 } from '@/lib/growth';
 import { loadGrowthState } from '@/lib/growth-storage';
 
-type MorePage = 'growth' | 'attendance';
-
 export default function MoreScreen() {
-  const router = useRouter();
-  const { view } = useLocalSearchParams<{ view?: string }>();
-  const [page, setPage] = useState<MorePage>('growth');
   const [growthState, setGrowthState] = useState<GrowthState>(() => createInitialGrowthState());
+  const [isAttendanceModalVisible, setIsAttendanceModalVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
-      setPage(view === 'attendance' ? 'attendance' : 'growth');
       void loadGrowthState().then((state) => {
         if (isActive) setGrowthState(state);
       });
       return () => {
         isActive = false;
       };
-    }, [view])
+    }, [])
   );
 
-  const openGrowth = () => {
-    router.setParams({ view: 'growth' });
-    setPage('growth');
-  };
-
   const openAttendance = () => {
-    router.setParams({ view: 'attendance' });
-    setPage('attendance');
+    setIsAttendanceModalVisible(true);
   };
 
-  return page === 'growth' ? (
-    <GrowthScreen growthState={growthState} onOpenAttendance={openAttendance} />
-  ) : (
-    <AttendanceScreen growthState={growthState} onBack={openGrowth} />
+  return (
+    <>
+      <GrowthScreen growthState={growthState} onOpenAttendance={openAttendance} />
+      <AttendanceRewardModal
+        growthState={growthState}
+        onClose={() => setIsAttendanceModalVisible(false)}
+        visible={isAttendanceModalVisible}
+      />
+    </>
   );
 }
 
@@ -164,7 +159,7 @@ function GrowthScreen({ growthState, onOpenAttendance }: { growthState: GrowthSt
   );
 }
 
-function AttendanceScreen({ growthState, onBack }: { growthState: GrowthState; onBack: () => void }) {
+export function AttendanceScreen({ growthState, onBack }: { growthState: GrowthState; onBack: () => void }) {
   const todayKey = getLocalDateKey(new Date());
   const todayEntry = growthState.attendanceHistory[todayKey];
   const attendanceCount = Object.keys(growthState.attendanceHistory).length;

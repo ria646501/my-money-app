@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
   Alert,
@@ -28,6 +28,7 @@ import {
   ExpenseRecordEditor,
 } from '@/components/expense-record-editor';
 import { CharacterRoom } from '@/components/character-room';
+import { AttendanceRewardModal } from '@/components/attendance-reward-modal';
 import { GrowthCelebrationModal } from '@/components/growth-celebration-modal';
 import {
   PRIMARY_SATISFACTION_ICON_SIZE,
@@ -111,7 +112,6 @@ const HOME_OPTION_CARD_HEIGHT = 70;
 const HOME_OPTION_CARD_RADIUS = 12;
 
 export default function HomeScreen() {
-  const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
   // 웹에서도 휴대폰 프레임 안에서 카드 폭을 계산한다.
   const homeOptionCardWidth = (Math.min(windowWidth, 430) - 55) / 5;
@@ -137,6 +137,7 @@ export default function HomeScreen() {
   const [isGrowthReady, setIsGrowthReady] = useState(false);
   const [rewardEffects, setRewardEffects] = useState<RewardFeedback[]>([]);
   const [growthCelebration, setGrowthCelebration] = useState<GrowthCelebration | null>(null);
+  const [isAttendanceModalVisible, setIsAttendanceModalVisible] = useState(false);
   const nextRecordId = useRef(0);
 
   const todayDateKey = getLocalDateKey(new Date());
@@ -645,10 +646,16 @@ export default function HomeScreen() {
             totalExp={growthCelebration?.totalExp ?? 0}
           />
 
+          <AttendanceRewardModal
+            growthState={growthState}
+            onClose={() => setIsAttendanceModalVisible(false)}
+            visible={isAttendanceModalVisible}
+          />
+
           <Pressable
             accessibilityLabel="출석 보상 화면 열기"
             accessibilityRole="button"
-            onPress={() => router.push({ pathname: '/more', params: { view: 'attendance' } })}
+            onPress={() => setIsAttendanceModalVisible(true)}
             style={({ pressed }) => [
               styles.attendanceCard,
               pressed && styles.buttonPressed,
