@@ -62,6 +62,7 @@ import { queueRewardFeedback } from '@/lib/reward-feedback';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
+const CALENDAR_SATISFACTION_ICON_SIZE = 38;
 const SATISFACTION_BACKGROUNDS: Record<Satisfaction, string> = {
   '😫': '#EAF3FF',
   '😕': '#FFF0F7',
@@ -688,7 +689,7 @@ export default function CalendarScreen() {
                   {dailySatisfaction ? (
                     <SatisfactionIconImage
                       satisfaction={dailySatisfaction}
-                      size={PRIMARY_SATISFACTION_ICON_SIZE}
+                      size={CALENDAR_SATISFACTION_ICON_SIZE}
                     />
                   ) : (
                     <View style={styles.satisfactionSpace} />
@@ -1232,18 +1233,19 @@ const styles = StyleSheet.create({
   },
   monthPickerCloseText: { color: BrandColors.onPrimary, fontSize: 14, fontWeight: '800' },
   dayCell: {
-    height: 96,
-    padding: 2,
+    height: 88,
+    padding: 3,
     width: '14.2857%',
   },
   dayCellInner: {
     alignItems: 'center',
-    borderColor: 'transparent',
-    borderRadius: 10,
+    backgroundColor: '#FFFEFC',
+    borderColor: '#EAE2DB',
+    borderRadius: 15,
     borderWidth: 1,
     flex: 1,
     paddingHorizontal: 2,
-    paddingTop: 3,
+    paddingTop: 4,
   },
   todayCell: {
     backgroundColor: BrandColors.primarySoft,
@@ -1258,7 +1260,7 @@ const styles = StyleSheet.create({
   },
   dayNumber: {
     color: '#4B5148',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   todayNumber: {
@@ -1271,7 +1273,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   satisfactionSpace: {
-    height: PRIMARY_SATISFACTION_ICON_SIZE,
+    height: CALENDAR_SATISFACTION_ICON_SIZE,
   },
   amount: {
     color: '#626960',
