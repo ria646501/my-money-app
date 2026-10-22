@@ -199,8 +199,9 @@ export async function ensurePortfolioDemoSeed(options: DemoSeedOptions = {}) {
   const dailySatisfactions = createDemoDailySatisfactions(records);
   const growthState: GrowthState = {
     ...createInitialGrowthState(),
-    totalExp: 75,
-    totalPoints: 38,
+    // 첫 진입에서 레벨업 팝업이 화면을 가리지 않도록, 이미 Lv.2 상태로 시작한다.
+    totalExp: 85,
+    totalPoints: 48,
   };
 
   await AsyncStorage.multiSet([
