@@ -45,6 +45,28 @@ export type TimeSelection = {
   period: Period;
 };
 
+export function removeDailySatisfactionIfDateIsEmpty(
+  remainingRecords: ExpenseRecord[],
+  deletedRecord: ExpenseRecord,
+  dailySatisfactions: DailySatisfactions
+) {
+  const hasRemainingRecordForDate = remainingRecords.some(
+    (record) => record.localDate === deletedRecord.localDate
+  );
+
+  if (
+    hasRemainingRecordForDate ||
+    !Object.prototype.hasOwnProperty.call(dailySatisfactions, deletedRecord.localDate)
+  ) {
+    return dailySatisfactions;
+  }
+
+  const updatedDailySatisfactions = { ...dailySatisfactions };
+  delete updatedDailySatisfactions[deletedRecord.localDate];
+
+  return updatedDailySatisfactions;
+}
+
 export function getDateKey(year: number, monthIndex: number, day: number) {
   const month = String(monthIndex + 1).padStart(2, '0');
   const date = String(day).padStart(2, '0');

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -45,6 +46,7 @@ import {
   getTimeSelection,
   migrateExpenseRecord,
   RECORDS_STORAGE_KEY,
+  removeDailySatisfactionIfDateIsEmpty,
   SATISFACTIONS,
   Satisfaction,
   StoredExpenseRecord,
@@ -93,12 +95,14 @@ const HOME_COLORS = {
   lavenderSoft: '#F2EDFF',
 } as const;
 
-const HOME_OPTION_CARD_GAP = 4;
-const HOME_OPTION_CARD_HEIGHT = 92;
-const HOME_OPTION_CARD_RADIUS = 8;
-const HOME_CATEGORY_CARD_WIDTH = 64;
+const HOME_OPTION_CARD_GAP = 1;
+const HOME_OPTION_CARD_HEIGHT = 70;
+const HOME_OPTION_CARD_RADIUS = 12;
 
 export default function HomeScreen() {
+  const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
+  const homeOptionCardWidth = (windowWidth - 55) / 5;
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -489,17 +493,35 @@ export default function HomeScreen() {
     }
   };
 
-  const deleteRecord = async (recordId: string) => {
-    const updatedRecords = records.filter((record) => record.id !== recordId);
-
-    setRecords(updatedRecords);
-    setEditingRecord(null);
+  const deleteRecord = async (recordToDelete: ExpenseRecord) => {
+    const updatedRecords = records.filter((record) => record.id !== recordToDelete.id);
+    const updatedDailySatisfactions = removeDailySatisfactionIfDateIsEmpty(
+      updatedRecords,
+      recordToDelete,
+      dailySatisfactions
+    );
+    const shouldDeleteDailySatisfaction = updatedDailySatisfactions !== dailySatisfactions;
 
     try {
-      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+      if (shouldDeleteDailySatisfaction) {
+        await AsyncStorage.multiSet([
+          [RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords)],
+          [DAILY_SATISFACTIONS_STORAGE_KEY, JSON.stringify(updatedDailySatisfactions)],
+        ]);
+      } else {
+        await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+      }
     } catch (error) {
       console.error('소비 기록을 삭제한 결과를 저장하지 못했습니다.', error);
+      Alert.alert('소비 기록을 삭제하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      return;
     }
+
+    setRecords(updatedRecords);
+    if (shouldDeleteDailySatisfaction) {
+      setDailySatisfactions(updatedDailySatisfactions);
+    }
+    setEditingRecord(null);
   };
 
   const confirmDeleteRecord = (record: ExpenseRecord) => {
@@ -508,7 +530,7 @@ export default function HomeScreen() {
       {
         text: '삭제',
         style: 'destructive',
-        onPress: () => void deleteRecord(record.id),
+        onPress: () => void deleteRecord(record),
       },
     ]);
   };
@@ -578,11 +600,47 @@ export default function HomeScreen() {
             rewardEffect={rewardEffect}
           />
 
-          <View style={styles.attendancePill}>
-            <Text style={styles.attendanceText}>
-              {isGrowthReady && didAttendToday ? '✓ 오늘 출석' : '출석 확인 중'}
-            </Text>
-          </View>
+          <Pressable
+            accessibilityLabel="출석 보상 화면 열기"
+            accessibilityRole="button"
+            onPress={() => router.push({ pathname: '/more', params: { view: 'attendance' } })}
+            style={({ pressed }) => [
+              styles.attendanceCard,
+              pressed && styles.buttonPressed,
+            ]}>
+            <View style={styles.attendanceCopy}>
+              <Text style={styles.attendanceTitle}>
+                {isGrowthReady && didAttendToday ? '✓ 오늘 출석 완료' : '오늘의 출석'}
+              </Text>
+              <Text style={styles.attendanceCaption}>
+                {isGrowthReady
+                  ? growthState.currentStreak > 0
+                    ? `${growthState.currentStreak}일 연속 출석 중`
+                    : '첫 출석을 기다리고 있어요'
+                  : '출석 확인 중'}
+              </Text>
+            </View>
+            <View accessibilityLabel="7일 출석 스탬프" style={styles.attendanceStamps}>
+              {Array.from({ length: 7 }, (_, index) => {
+                const isStamped = index < Math.min(growthState.currentStreak, 7);
+
+                return (
+                  <View
+                    key={index}
+                    style={[styles.attendanceStamp, isStamped && styles.attendanceStampDone]}>
+                    <Text
+                      style={[
+                        styles.attendanceStampText,
+                        isStamped && styles.attendanceStampTextDone,
+                      ]}>
+                      {isStamped ? '✓' : index + 1}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            <MaterialCommunityIcons color={HOME_COLORS.pink} name="chevron-right" size={22} />
+          </Pressable>
 
           <View style={styles.entryArea}>
             <View style={styles.form}>
@@ -626,6 +684,7 @@ export default function HomeScreen() {
                         onPress={() => setCategoryId(item.id)}
                         style={({ pressed }) => [
                           styles.categoryButton,
+                          { width: homeOptionCardWidth },
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}>
@@ -644,6 +703,7 @@ export default function HomeScreen() {
                     onPress={() => setIsCategoryManagerVisible(true)}
                     style={({ pressed }) => [
                       styles.categoryButton,
+                      { width: homeOptionCardWidth },
                       styles.categoryManageButton,
                       pressed && styles.buttonPressed,
                     ]}>
@@ -896,19 +956,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 3,
   },
-  attendancePill: {
-    alignSelf: 'flex-start',
+  attendanceCard: {
+    alignItems: 'center',
     backgroundColor: '#FFF4FA',
     borderColor: '#F6CFE1',
-    borderRadius: 10,
+    borderRadius: 16,
     borderWidth: 1,
+    flexDirection: 'row',
+    gap: 9,
     marginBottom: 10,
-    marginLeft: 1,
-    marginTop: -2,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    marginTop: 2,
+    minHeight: 76,
+    paddingHorizontal: 12,
   },
-  attendanceText: { color: HOME_COLORS.pink, fontSize: 11, fontWeight: '800' },
+  attendanceCopy: { minWidth: 88 },
+  attendanceTitle: { color: HOME_COLORS.pink, fontSize: 13, fontWeight: '900' },
+  attendanceCaption: { color: HOME_COLORS.muted, fontSize: 10, marginTop: 4 },
+  attendanceStamps: { flex: 1, flexDirection: 'row', gap: 3, justifyContent: 'center' },
+  attendanceStamp: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E9DDE4',
+    borderRadius: 11,
+    borderWidth: 1,
+    height: 22,
+    justifyContent: 'center',
+    width: 22,
+  },
+  attendanceStampDone: { backgroundColor: '#FFD7E7', borderColor: '#EF7FAA' },
+  attendanceStampText: { color: '#A99BA6', fontSize: 9, fontWeight: '800' },
+  attendanceStampTextDone: { color: '#D94E87' },
   dailySummaryCard: {
     alignItems: 'center',
     backgroundColor: HOME_COLORS.card,
@@ -1016,8 +1093,7 @@ const styles = StyleSheet.create({
     height: HOME_OPTION_CARD_HEIGHT,
     justifyContent: 'center',
     paddingHorizontal: 3,
-    paddingVertical: 5,
-    width: HOME_CATEGORY_CARD_WIDTH,
+    paddingVertical: 2,
   },
   categoryButtonSelected: {
     backgroundColor: HOME_COLORS.pinkSoft,
@@ -1030,7 +1106,7 @@ const styles = StyleSheet.create({
     color: HOME_COLORS.muted,
     fontSize: 10,
     fontWeight: '700',
-    marginTop: 4,
+    marginTop: 2,
     textAlign: 'center',
     width: '100%',
   },
@@ -1264,16 +1340,16 @@ const styles = StyleSheet.create({
   },
   dailySatisfactionRow: {
     flexDirection: 'row',
-    gap: 1,
+    gap: HOME_OPTION_CARD_GAP,
   },
   dailySatisfactionButton: {
     alignItems: 'center',
     backgroundColor: '#FFFFFFB8',
     borderColor: '#F5DDE5',
-    borderRadius: 12,
+    borderRadius: HOME_OPTION_CARD_RADIUS,
     borderWidth: 1,
     flex: 1,
-    height: 70,
+    height: HOME_OPTION_CARD_HEIGHT,
     justifyContent: 'center',
   },
   dailySatisfactionButtonSelected: {

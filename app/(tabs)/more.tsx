@@ -1,8 +1,9 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { CharacterRoomLayer, CharacterVisual } from '@/components/character-visual';
 import { getLocalDateKey } from '@/lib/expense-record';
 import {
   createInitialGrowthState,
@@ -24,25 +25,38 @@ const CHARACTER_IMAGES = {
 type MorePage = 'growth' | 'attendance';
 
 export default function MoreScreen() {
+  const router = useRouter();
+  const { view } = useLocalSearchParams<{ view?: string }>();
   const [page, setPage] = useState<MorePage>('growth');
   const [growthState, setGrowthState] = useState<GrowthState>(() => createInitialGrowthState());
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
+      setPage(view === 'attendance' ? 'attendance' : 'growth');
       void loadGrowthState().then((state) => {
         if (isActive) setGrowthState(state);
       });
       return () => {
         isActive = false;
       };
-    }, [])
+    }, [view])
   );
 
+  const openGrowth = () => {
+    router.setParams({ view: 'growth' });
+    setPage('growth');
+  };
+
+  const openAttendance = () => {
+    router.setParams({ view: 'attendance' });
+    setPage('attendance');
+  };
+
   return page === 'growth' ? (
-    <GrowthScreen growthState={growthState} onOpenAttendance={() => setPage('attendance')} />
+    <GrowthScreen growthState={growthState} onOpenAttendance={openAttendance} />
   ) : (
-    <AttendanceScreen growthState={growthState} onBack={() => setPage('growth')} />
+    <AttendanceScreen growthState={growthState} onBack={openGrowth} />
   );
 }
 
@@ -76,13 +90,13 @@ function GrowthScreen({ growthState, onOpenAttendance }: { growthState: GrowthSt
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <ScreenHeader title="캐릭터 성장" />
         <View style={styles.roomCard}>
-          <Image resizeMode="cover" source={require('@/assets/characters/character-room.png')} style={styles.roomBackground} />
-          <View style={styles.levelBadge}>
-            <Text style={styles.levelText}>Lv.{stageIndex + 1}</Text>
-            <Text style={styles.heartText}>♥♥♥♡</Text>
-          </View>
+          <CharacterRoomLayer interiorOnly style={styles.roomBackground} />
           <View style={styles.growthBubble}><Text style={styles.growthBubbleText}>조금씩 자라고 있어!</Text></View>
-          <Image resizeMode="contain" source={CHARACTER_IMAGES[progress.stage.id]} style={styles.growthCharacter} />
+          <CharacterVisual
+            maxSize={145}
+            stageId={progress.stage.id}
+            style={styles.growthCharacter}
+          />
         </View>
 
         <View style={styles.stageSummaryRow}>
@@ -93,16 +107,18 @@ function GrowthScreen({ growthState, onOpenAttendance }: { growthState: GrowthSt
           <Text style={styles.expLabel}>EXP</Text>
           <Text style={styles.expValue}>{progress.currentExpInStage} / {stageRange}</Text>
         </View>
-        <View style={styles.expTrack}><View style={[styles.expFill, { width: `${Math.round(progress.progress * 100)}%` }]} /></View>
 
         {progress.nextStage ? (
           <View style={styles.nextStageCard}>
-            <Image resizeMode="contain" source={CHARACTER_IMAGES[progress.nextStage.id]} style={styles.nextStageImage} />
+            <CharacterVisual
+              maxSize={48}
+              silhouette
+              stageId={progress.nextStage.id}
+            />
             <View style={styles.nextStageCopy}>
               <Text style={styles.nextStageTitle}>다음 단계까지</Text>
               <Text style={styles.nextStageText}>앞으로 {progress.expToNextStage} EXP 남았어!</Text>
             </View>
-            <Text style={styles.chevron}>›</Text>
           </View>
         ) : null}
 
@@ -113,16 +129,14 @@ function GrowthScreen({ growthState, onOpenAttendance }: { growthState: GrowthSt
             const isUnlocked = growthState.totalExp >= stage.minimumExp;
             return (
               <View key={stage.id} style={[styles.stageCard, isCurrent && styles.stageCardCurrent]}>
-                {stage.id === 'MYSTERY' ? (
-                  <Image
-                    resizeMode="contain"
-                    source={CHARACTER_IMAGES.MYSTERY}
-                    style={[styles.stageImage, styles.mysteryCharacter]}
-                  />
-                ) : (
-                  <Image resizeMode="contain" source={CHARACTER_IMAGES[stage.id]} style={[styles.stageImage, !isUnlocked && styles.lockedImage]} />
-                )}
-                <Text style={styles.stageName}>{stage.name}</Text>
+                <CharacterVisual
+                  maxSize={48}
+                  silhouette={!isUnlocked || stage.id === 'MYSTERY'}
+                  stageId={stage.id}
+                />
+                <Text style={styles.stageName}>
+                  {isUnlocked && stage.id !== 'MYSTERY' ? stage.name : '???'}
+                </Text>
                 <Text style={[styles.stageStatus, isCurrent && styles.stageStatusCurrent]}>
                   {isCurrent ? '현재' : isUnlocked ? '완료 ✓' : '잠김'}
                 </Text>
@@ -246,13 +260,10 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#302D55', fontSize: 21, fontWeight: '900' },
   headerSparkle: { color: '#FF77AB', fontSize: 25, width: 28 },
   roomCard: { alignSelf: 'center', height: 292, maxWidth: 390, overflow: 'hidden', position: 'relative', width: '100%' },
-  roomBackground: { height: '100%', width: '100%' },
-  levelBadge: { alignItems: 'center', backgroundColor: '#FFF0F5', borderColor: '#FFA0C3', borderRadius: 13, borderWidth: 1, flexDirection: 'row', gap: 14, left: '43%', paddingHorizontal: 12, paddingVertical: 7, position: 'absolute', top: 18 },
-  levelText: { color: '#F25F9B', fontSize: 14, fontWeight: '900' },
-  heartText: { color: '#454A7E', fontSize: 17, letterSpacing: 2 },
+  roomBackground: { bottom: 0, left: 0, position: 'absolute', right: 0, top: 0 },
   growthBubble: { backgroundColor: '#FFFDFC', borderColor: '#4C4578', borderRadius: 12, borderWidth: 2, left: '32%', paddingHorizontal: 18, paddingVertical: 10, position: 'absolute', top: 83, zIndex: 2 },
   growthBubbleText: { color: '#302D55', fontSize: 14, fontWeight: '900' },
-  growthCharacter: { bottom: 17, height: 135, left: '34%', position: 'absolute', width: 135 },
+  growthCharacter: { bottom: 8, left: '30%', position: 'absolute' },
   stageSummaryRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   stageSummary: { color: '#302D55', fontSize: 17, fontWeight: '900' },
   pointPill: { backgroundColor: '#FFF0F6', borderColor: '#FFB5D1', borderRadius: 20, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 7 },
@@ -260,10 +271,7 @@ const styles = StyleSheet.create({
   expHeader: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   expLabel: { color: '#302D55', fontSize: 12, fontWeight: '900' },
   expValue: { color: '#302D55', fontSize: 12, fontWeight: '700' },
-  expTrack: { backgroundColor: '#FFF6FB', borderColor: '#F7BAD4', borderRadius: 7, borderWidth: 1, height: 13, marginTop: 7, overflow: 'hidden' },
-  expFill: { backgroundColor: '#F77CAC', borderRadius: 6, height: '100%' },
   nextStageCard: { alignItems: 'center', backgroundColor: '#FFFCFA', borderColor: '#F4BDD7', borderRadius: 17, borderWidth: 1, flexDirection: 'row', marginTop: 14, minHeight: 68, paddingHorizontal: 12 },
-  nextStageImage: { height: 48, width: 48 },
   nextStageCopy: { flex: 1, marginLeft: 10 },
   nextStageTitle: { color: '#302D55', fontSize: 12, fontWeight: '900' },
   nextStageText: { color: '#4F486C', fontSize: 12, marginTop: 4 },
@@ -272,9 +280,6 @@ const styles = StyleSheet.create({
   stageGrid: { flexDirection: 'row', gap: 5, marginTop: 10 },
   stageCard: { alignItems: 'center', backgroundColor: '#FFFCFA', borderColor: '#EADFE7', borderRadius: 12, borderWidth: 1, flex: 1, minHeight: 102, paddingHorizontal: 2, paddingVertical: 7 },
   stageCardCurrent: { backgroundColor: '#FFF1F7', borderColor: '#FF6FA7', borderWidth: 1.5 },
-  stageImage: { height: 44, width: 44 },
-  lockedImage: { opacity: 0.35 },
-  mysteryCharacter: { opacity: 0.72, tintColor: '#75658F' },
   stageName: { color: '#302D55', fontSize: 11, fontWeight: '800' },
   stageStatus: { color: '#A095AD', fontSize: 10, marginTop: 3 },
   stageStatusCurrent: { color: '#F0649C', fontWeight: '800' },

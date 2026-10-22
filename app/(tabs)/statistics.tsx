@@ -3,7 +3,6 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Image,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
 
 import { BrandColors } from '@/constants/theme';
 import { CategoryIconImage } from '@/components/category-icon-image';
+import { CharacterVisual } from '@/components/character-visual';
 import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
 import {
   DAILY_SATISFACTIONS_STORAGE_KEY,
@@ -33,23 +33,25 @@ import {
   getMonthlyTotal,
   getPreviousMonth,
 } from '@/lib/statistics';
+import { createInitialGrowthState, getCharacterStage, GrowthState } from '@/lib/growth';
+import { loadGrowthState } from '@/lib/growth-storage';
 
-const CATEGORY_COLORS = [
-  '#7C5CFC',
-  '#F49C9C',
+const DONUT_COLORS = [
+  '#A98BEF',
+  '#EF82B6',
   '#F6C85F',
   '#6DCFC1',
-  '#75A7F0',
+  '#8FC7F4',
   '#C493E8',
-  '#F3A766',
+  '#F2B479',
   '#89B86C',
 ] as const;
 const SATISFACTION_COLORS: Record<Satisfaction, string> = {
-  '😫': '#8FC7F4',
-  '😕': '#F6A7C8',
-  '😐': '#F6D77D',
-  '🙂': '#F2B479',
-  '😍': '#EF82B6',
+  '😫': DONUT_COLORS[4],
+  '😕': DONUT_COLORS[5],
+  '😐': DONUT_COLORS[2],
+  '🙂': DONUT_COLORS[6],
+  '😍': DONUT_COLORS[1],
 };
 const SATISFACTION_LABELS: Record<Satisfaction, string> = {
   '😫': '많이 아쉬웠어요',
@@ -58,8 +60,14 @@ const SATISFACTION_LABELS: Record<Satisfaction, string> = {
   '🙂': '만족스러웠어요',
   '😍': '정말 좋았어요',
 };
+const SATISFACTION_REVIEW_TEXT: Record<Satisfaction, string> = {
+  '😫': '이번 달에는 많이 아쉬웠던 날이 가장 많았어요',
+  '😕': '이번 달에는 아쉬웠던 날이 가장 많았어요',
+  '😐': '이번 달에는 보통으로 느낀 날이 가장 많았어요',
+  '🙂': '이번 달에는 괜찮았던 날이 가장 많았어요',
+  '😍': '이번 달에는 만족스러웠던 날이 가장 많았어요',
+};
 const DONUT_SEGMENTS = 144;
-const characterSource = require('@/assets/characters/chick.png');
 
 function getStableCategoryColor(categoryId: string) {
   let hash = 0;
@@ -68,7 +76,7 @@ function getStableCategoryColor(categoryId: string) {
     hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
   }
 
-  return CATEGORY_COLORS[hash % CATEGORY_COLORS.length];
+  return DONUT_COLORS[hash % DONUT_COLORS.length];
 }
 
 type DonutSegment = { color: string; key: string; percentage: number };
@@ -131,6 +139,7 @@ export default function StatisticsScreen() {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [dailySatisfactions, setDailySatisfactions] = useState<DailySatisfactions>({});
+  const [growthState, setGrowthState] = useState<GrowthState>(() => createInitialGrowthState());
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
 
   useFocusEffect(
@@ -139,6 +148,16 @@ export default function StatisticsScreen() {
       const today = new Date();
 
       setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+
+      void loadGrowthState()
+        .then((state) => {
+          if (isActive) {
+            setGrowthState(state);
+          }
+        })
+        .catch((error) => {
+          console.error('통계 캐릭터 성장 상태를 불러오지 못했습니다.', error);
+        });
 
       const loadStatisticsData = async () => {
         try {
@@ -241,6 +260,8 @@ export default function StatisticsScreen() {
     (total, item) => total + item.count,
     0
   );
+  const topDailySatisfaction = dailySatisfactionBreakdown[0] ?? null;
+  const currentCharacterStage = getCharacterStage(growthState.totalExp);
   const categorySatisfactionRanking = useMemo(
     () => getCategorySatisfactionRanking(monthlyRecords),
     [monthlyRecords]
@@ -308,7 +329,11 @@ export default function StatisticsScreen() {
             <View style={styles.summarySpeechBubble}>
               <Text numberOfLines={1} style={styles.summarySpeechText}>이번 달도 기록했네!</Text>
             </View>
-            <Image resizeMode="contain" source={characterSource} style={styles.characterImage} />
+            <CharacterVisual
+              maxSize={94}
+              stageId={currentCharacterStage.id}
+              style={styles.characterImage}
+            />
           </View>
         </View>
 
@@ -327,8 +352,10 @@ export default function StatisticsScreen() {
                 segments={categoryDonutSegments}
               />
               <View style={styles.legend}>
-                {categoryBreakdown.map((item) => (
-                  <View key={item.categoryId} style={styles.legendRow}>
+                {categoryBreakdown.map((item, index) => (
+                  <View
+                    key={item.categoryId}
+                    style={[styles.legendRow, index === 0 && styles.legendRowTop]}>
                     <View
                       style={[
                         styles.legendDot,
@@ -339,7 +366,13 @@ export default function StatisticsScreen() {
                         },
                       ]}
                     />
-                    <Text numberOfLines={1} style={styles.legendName}>{item.categoryName}</Text>
+                    <View style={styles.legendCopy}>
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.legendName, index === 0 && styles.legendNameTop]}>
+                        {item.categoryName}
+                      </Text>
+                    </View>
                     <Text style={styles.legendPercentage}>{item.percentage}%</Text>
                   </View>
                 ))}
@@ -355,26 +388,54 @@ export default function StatisticsScreen() {
               <Text style={styles.emptyText}>하루 소비 만족도를 기록하면 함께 돌아볼 수 있어요.</Text>
             </View>
           ) : (
-            <View style={styles.breakdownContent}>
-              <DonutChart
-                accessibilityLabel={`이번 달 하루 소비 만족도 ${dailySatisfactionDayCount}일`}
-                centerLabel="회고"
-                centerValue={`${dailySatisfactionDayCount}일`}
-                segments={dailySatisfactionDonutSegments}
-              />
-              <View style={styles.satisfactionLegend}>
-                {dailySatisfactionBreakdown.map((item) => (
-                  <View key={item.satisfaction} style={styles.satisfactionLegendRow}>
-                    <SatisfactionIconImage satisfaction={item.satisfaction} size={30} />
-                    <Text numberOfLines={1} style={styles.satisfactionLegendName}>
-                      {SATISFACTION_LABELS[item.satisfaction]}
-                    </Text>
-                    <Text style={styles.satisfactionLegendValue}>
-                      {item.count}일 · {item.percentage}%
-                    </Text>
-                  </View>
-                ))}
+            <View style={styles.chartWithSummary}>
+              <View style={styles.breakdownContent}>
+                <DonutChart
+                  accessibilityLabel={`이번 달 하루 소비 만족도 ${dailySatisfactionDayCount}일`}
+                  centerLabel="회고"
+                  centerValue={`${dailySatisfactionDayCount}일`}
+                  segments={dailySatisfactionDonutSegments}
+                />
+                <View style={styles.legend}>
+                  {dailySatisfactionBreakdown.map((item, index) => (
+                    <View
+                      key={item.satisfaction}
+                      style={[styles.legendRow, index === 0 && styles.legendRowTop]}>
+                      <View
+                        style={[
+                          styles.legendDot,
+                          { backgroundColor: SATISFACTION_COLORS[item.satisfaction] },
+                        ]}
+                      />
+                      <View style={styles.legendCopy}>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.legendName, index === 0 && styles.legendNameTop]}>
+                          {SATISFACTION_LABELS[item.satisfaction]}
+                        </Text>
+                      </View>
+                      <Text style={styles.legendPercentage}>
+                        {item.count}일 · {item.percentage}%
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               </View>
+              {topDailySatisfaction ? (
+                <View style={styles.satisfactionSummary}>
+                  <SatisfactionIconImage
+                    satisfaction={topDailySatisfaction.satisfaction}
+                    size={24}
+                  />
+                  <Text
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                    numberOfLines={1}
+                    style={styles.satisfactionSummaryText}>
+                    {SATISFACTION_REVIEW_TEXT[topDailySatisfaction.satisfaction]}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           )}
         </View>
@@ -464,7 +525,7 @@ const styles = StyleSheet.create({
   characterSlot: { bottom: 3, height: 116, position: 'absolute', right: 7, width: 116 },
   summarySpeechBubble: { alignItems: 'center', backgroundColor: '#FFFDFC', borderColor: '#8D7BB7', borderRadius: 9, borderWidth: 1, left: 0, paddingHorizontal: 6, paddingVertical: 4, position: 'absolute', top: 2, width: 104, zIndex: 2 },
   summarySpeechText: { color: '#403865', fontSize: 9, fontWeight: '800' },
-  characterImage: { bottom: -2, height: 86, position: 'absolute', right: 1, width: 94 },
+  characterImage: { bottom: -2, position: 'absolute', right: 1 },
   chartSection: { paddingVertical: 2 },
   sectionTitle: { color: '#302D55', fontSize: 16, fontWeight: '900', marginBottom: 12 },
   emptyState: {
@@ -476,9 +537,10 @@ const styles = StyleSheet.create({
   },
   emptyText: { color: BrandColors.textMuted, fontSize: 14, fontWeight: '600' },
   breakdownContent: { alignItems: 'center', flexDirection: 'row', gap: 16 },
+  chartWithSummary: { gap: 8 },
   donut: { height: 142, position: 'relative', width: 142 },
   donutSegmentTrack: { height: 142, left: 0, position: 'absolute', top: 0, width: 142 },
-  donutSegment: { borderRadius: 2, height: 12, left: 69, position: 'absolute', top: 1, width: 4 },
+  donutSegment: { borderRadius: 2, height: 18, left: 69, position: 'absolute', top: 1, width: 4 },
   donutCenter: {
     alignItems: 'center',
     backgroundColor: BrandColors.surface,
@@ -498,16 +560,36 @@ const styles = StyleSheet.create({
     marginTop: 3,
     maxWidth: 88,
   },
-  legend: { flex: 1, gap: 7 },
-  legendRow: { alignItems: 'center', flexDirection: 'row' },
+  legend: { flex: 1, gap: 5 },
+  legendRow: {
+    alignItems: 'center',
+    borderColor: 'transparent',
+    borderRadius: 9,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 38,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  legendRowTop: { backgroundColor: '#FFF0F7', borderColor: '#F4BDD7' },
   legendDot: { borderRadius: 5, height: 10, marginRight: 7, width: 10 },
-  legendName: { color: BrandColors.text, flex: 1, fontSize: 12, fontWeight: '700' },
+  legendCopy: { flex: 1 },
+  legendName: { color: BrandColors.text, fontSize: 12, fontWeight: '700' },
+  legendNameTop: { color: '#D94E87', fontWeight: '900' },
   legendPercentage: { color: BrandColors.textMuted, fontSize: 12, fontWeight: '800', marginLeft: 5 },
   insightSection: { paddingTop: 2 },
-  satisfactionLegend: { flex: 1, gap: 7 },
-  satisfactionLegendRow: { alignItems: 'center', flexDirection: 'row', minHeight: 30 },
-  satisfactionLegendName: { color: '#4F486C', flex: 1, fontSize: 12, fontWeight: '700', marginLeft: 9 },
-  satisfactionLegendValue: { color: '#302D55', fontSize: 12, fontWeight: '900', marginLeft: 8 },
+  satisfactionSummary: {
+    alignItems: 'center',
+    backgroundColor: '#FFF0F7',
+    borderColor: '#F4BDD7',
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 7,
+    minHeight: 36,
+    paddingHorizontal: 10,
+  },
+  satisfactionSummaryText: { color: '#A46C84', flex: 1, fontSize: 11, fontWeight: '800' },
   rankingCard: { backgroundColor: '#FFFCFA', borderColor: '#F4BDD7', borderRadius: 18, borderWidth: 1, overflow: 'hidden', paddingHorizontal: 13 },
   rankingRow: { alignItems: 'center', borderBottomColor: '#F2E5EA', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 66 },
   rankingNumber: { color: '#F0649C', fontSize: 17, fontWeight: '900', textAlign: 'center', width: 25 },

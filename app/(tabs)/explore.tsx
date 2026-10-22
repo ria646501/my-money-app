@@ -45,6 +45,7 @@ import {
   getTimeSelection,
   migrateExpenseRecord,
   RECORDS_STORAGE_KEY,
+  removeDailySatisfactionIfDateIsEmpty,
   SATISFACTIONS,
   Satisfaction,
   StoredExpenseRecord,
@@ -465,17 +466,35 @@ export default function CalendarScreen() {
     }
   };
 
-  const deleteRecord = async (recordId: string) => {
-    const updatedRecords = records.filter((record) => record.id !== recordId);
-
-    setRecords(updatedRecords);
-    setEditingRecord(null);
+  const deleteRecord = async (recordToDelete: ExpenseRecord) => {
+    const updatedRecords = records.filter((record) => record.id !== recordToDelete.id);
+    const updatedDailySatisfactions = removeDailySatisfactionIfDateIsEmpty(
+      updatedRecords,
+      recordToDelete,
+      dailySatisfactions
+    );
+    const shouldDeleteDailySatisfaction = updatedDailySatisfactions !== dailySatisfactions;
 
     try {
-      await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+      if (shouldDeleteDailySatisfaction) {
+        await AsyncStorage.multiSet([
+          [RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords)],
+          [DAILY_SATISFACTIONS_STORAGE_KEY, JSON.stringify(updatedDailySatisfactions)],
+        ]);
+      } else {
+        await AsyncStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(updatedRecords));
+      }
     } catch (error) {
       console.error('소비 기록을 삭제한 결과를 저장하지 못했습니다.', error);
+      Alert.alert('소비 기록을 삭제하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      return;
     }
+
+    setRecords(updatedRecords);
+    if (shouldDeleteDailySatisfaction) {
+      setDailySatisfactions(updatedDailySatisfactions);
+    }
+    setEditingRecord(null);
   };
 
   const confirmDeleteRecord = () => {
@@ -483,14 +502,14 @@ export default function CalendarScreen() {
       return;
     }
 
-    const recordId = editingRecord.id;
+    const recordToDelete = editingRecord;
 
     Alert.alert('이 소비 기록을 삭제할까요?', '삭제한 기록은 되돌릴 수 없어요.', [
       { text: '취소', style: 'cancel' },
       {
         text: '삭제',
         style: 'destructive',
-        onPress: () => void deleteRecord(recordId),
+        onPress: () => void deleteRecord(recordToDelete),
       },
     ]);
   };

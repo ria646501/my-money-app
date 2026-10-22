@@ -14,8 +14,14 @@ import {
 } from 'react-native';
 
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
-import { CategoryIconImage } from '@/components/category-icon-image';
-import { SatisfactionIconImage } from '@/components/satisfaction-icon-image';
+import {
+  CategoryIconImage,
+  PRIMARY_CATEGORY_ICON_SIZE,
+} from '@/components/category-icon-image';
+import {
+  PRIMARY_SATISFACTION_ICON_SIZE,
+  SatisfactionIconImage,
+} from '@/components/satisfaction-icon-image';
 import { ExpenseCategory } from '@/lib/categories';
 import {
   ExpenseRecord,
@@ -25,12 +31,12 @@ import {
   TimeSelection,
 } from '@/lib/expense-record';
 
-const SATISFACTION_LABELS: Record<Satisfaction, string> = {
-  '😫': '매우 불만족',
-  '😕': '불만족',
-  '😐': '보통',
-  '🙂': '만족',
-  '😍': '매우 만족',
+const SATISFACTION_BACKGROUNDS: Record<Satisfaction, string> = {
+  '😫': '#EAF3FF',
+  '😕': '#FFF0F7',
+  '😐': '#FFF9DE',
+  '🙂': '#FFF1E6',
+  '😍': '#FFEAF4',
 };
 
 const MEMO_MAX_LENGTH = 100;
@@ -225,7 +231,17 @@ export function ExpenseRecordEditor({
                           isSelected && styles.categoryButtonSelected,
                           pressed && styles.pressed,
                         ]}>
-                        <CategoryIconImage icon={item.icon} size={46} />
+                        <CategoryIconImage
+                          icon={item.icon}
+                          size={PRIMARY_CATEGORY_ICON_SIZE}
+                        />
+                        <Text
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.75}
+                          numberOfLines={1}
+                          style={styles.categoryName}>
+                          {item.name}
+                        </Text>
                       </Pressable>
                     );
                   })}
@@ -247,18 +263,14 @@ export function ExpenseRecordEditor({
                         onPress={() => setSatisfaction(item)}
                         style={({ pressed }) => [
                           styles.satisfactionButton,
+                          { backgroundColor: SATISFACTION_BACKGROUNDS[item] },
                           isSelected && styles.satisfactionButtonSelected,
                           pressed && styles.pressed,
                         ]}>
-                        <SatisfactionIconImage satisfaction={item} size={36} />
-                        <Text
-                          numberOfLines={1}
-                          style={[
-                            styles.satisfactionLabel,
-                            isSelected && styles.satisfactionLabelSelected,
-                          ]}>
-                          {SATISFACTION_LABELS[item]}
-                        </Text>
+                        <SatisfactionIconImage
+                          satisfaction={item}
+                          size={PRIMARY_SATISFACTION_ICON_SIZE}
+                        />
                       </Pressable>
                     );
                   })}
@@ -395,31 +407,36 @@ const styles = StyleSheet.create({
   },
   amountInput: { color: '#302D55', flex: 1, fontSize: 28, fontWeight: '900', lineHeight: 34, paddingVertical: 0 },
   wonPrefix: { color: '#D68BAA', fontSize: 26, fontWeight: '800', lineHeight: 34, marginRight: 7 },
-  optionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  optionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 1 },
   categoryButton: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF7F8',
     borderColor: '#EEDDE5',
-    borderRadius: 11,
+    borderRadius: 12,
     borderWidth: 1,
-    flexBasis: '18.8%',
-    gap: 3,
+    flexBasis: '19.7%',
     justifyContent: 'center',
-    minHeight: 62,
+    height: 70,
     paddingHorizontal: 3,
-    paddingVertical: 6,
+    paddingVertical: 2,
   },
   categoryButtonSelected: { backgroundColor: '#FFF0F6', borderColor: '#FF75AB' },
-  satisfactionRow: { flexDirection: 'row', gap: 5 },
+  categoryName: {
+    color: '#8F849C',
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 2,
+    textAlign: 'center',
+    width: '100%',
+  },
+  satisfactionRow: { flexDirection: 'row', gap: 1 },
   satisfactionButton: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     borderColor: '#EEDDE5',
-    borderRadius: 11,
+    borderRadius: 12,
     borderWidth: 1,
     flex: 1,
-    gap: 4,
-    height: 68,
+    height: 70,
     justifyContent: 'center',
   },
   satisfactionButtonSelected: {
@@ -427,9 +444,6 @@ const styles = StyleSheet.create({
     borderColor: '#FF75AB',
     borderWidth: 1.5,
   },
-  satisfactionEmoji: { fontSize: 24 },
-  satisfactionLabel: { color: '#8F849C', fontSize: 10, fontWeight: '600' },
-  satisfactionLabelSelected: { color: '#E85C96', fontWeight: '800' },
   memoContainer: {
     backgroundColor: '#FFFFFF',
     borderColor: '#EEDDE5',

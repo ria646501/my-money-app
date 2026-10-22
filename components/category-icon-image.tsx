@@ -17,7 +17,7 @@ const CATEGORY_IMAGES: Record<CategoryIconName, ImageSourcePropType> = {
   'paw-outline': require('@/assets/categories/pet.png'),
 };
 
-export const PRIMARY_CATEGORY_ICON_SIZE = 58;
+export const PRIMARY_CATEGORY_ICON_SIZE = 44;
 
 type CategoryIconImageProps = {
   icon: CategoryIconName;

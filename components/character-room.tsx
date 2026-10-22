@@ -1,16 +1,14 @@
-import { Image, ImageSourcePropType, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { CharacterRoomLayer, CharacterVisual } from '@/components/character-visual';
 import { CharacterStage, StageProgress } from '@/lib/growth';
 
-const roomSource = require('@/assets/characters/character-room.png');
-
-const CHARACTER_BY_STAGE: Record<CharacterStage['id'], { level: number; source: ImageSourcePropType }> = {
-  EGG: { level: 1, source: require('@/assets/characters/egg.png') },
-  CHICK: { level: 2, source: require('@/assets/characters/chick.png') },
-  GROWING_CHICKEN: { level: 3, source: require('@/assets/characters/juvenile.png') },
-  CHICKEN: { level: 4, source: require('@/assets/characters/chicken.png') },
-  // A separate final-stage asset is not prepared yet, so it keeps the chicken visual for now.
-  MYSTERY: { level: 4, source: require('@/assets/characters/chicken.png') },
+const LEVEL_BY_STAGE: Record<CharacterStage['id'], number> = {
+  EGG: 1,
+  CHICK: 2,
+  GROWING_CHICKEN: 3,
+  CHICKEN: 4,
+  MYSTERY: 5,
 };
 
 type RewardEffect = {
@@ -26,19 +24,16 @@ type CharacterRoomProps = {
 const SPEECH_TEXT = '오늘도\n기록해볼까?';
 
 export function CharacterRoom({ progress, rewardEffect = null }: CharacterRoomProps) {
-  const character = CHARACTER_BY_STAGE[progress.stage.id];
   const totalExp = progress.stage.minimumExp + progress.currentExpInStage;
   const requiredExp = progress.nextStage?.minimumExp ?? Math.max(1, totalExp);
   const displayedProgress = Math.min(1, totalExp / requiredExp);
 
   return (
     <View accessibilityLabel="캐릭터 방" style={styles.container}>
-      <Image resizeMode="contain" source={roomSource} style={styles.roomBackground} />
+      <CharacterRoomLayer style={styles.roomBackground} />
 
       <View pointerEvents="none" style={styles.topStatus}>
-        <Text style={styles.levelText}>Lv.{character.level}</Text>
-        {/* TODO: Replace these preview hearts with the future character mood/condition state. */}
-        <Text style={styles.hearts}>♥ ♥ ♥ ♡</Text>
+        <Text style={styles.levelText}>Lv.{LEVEL_BY_STAGE[progress.stage.id]}</Text>
       </View>
 
       <View pointerEvents="none" style={styles.speechBubble}>
@@ -46,9 +41,9 @@ export function CharacterRoom({ progress, rewardEffect = null }: CharacterRoomPr
         <View style={styles.speechTail} />
       </View>
 
-      <Image
-        resizeMode="contain"
-        source={character.source}
+      <CharacterVisual
+        maxSize={100}
+        stageId={progress.stage.id}
         style={styles.characterImage}
       />
 
@@ -109,12 +104,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '900',
   },
-  hearts: {
-    color: '#ED6C9B',
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
   speechBubble: {
     backgroundColor: '#FFFDF9',
     borderColor: '#37478E',
@@ -150,10 +139,8 @@ const styles = StyleSheet.create({
   },
   characterImage: {
     bottom: '16%',
-    height: '29%',
-    left: '37.5%',
+    left: '36%',
     position: 'absolute',
-    width: '25%',
   },
   rewardEffect: {
     alignItems: 'center',
