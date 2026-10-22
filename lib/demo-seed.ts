@@ -28,6 +28,11 @@ export const DEMO_STATS_RESEED_GUARD_KEY = '@my-money-app/demo-seed-v3-complete'
 const ACTIVE_DEMO_SEED_GUARD_KEY = DEMO_STATS_RESEED_GUARD_KEY;
 const DEMO_SEED_REVISION = 3;
 
+type DemoSeedOptions = {
+  /** 웹 포트폴리오를 새로 열 때는 언제나 체험용 데이터를 다시 준비한다. */
+  force?: boolean;
+};
+
 type DemoBackup = {
   createdAt: string;
   values: Record<string, string | null>;
@@ -84,12 +89,14 @@ function getSeedCategories(rawCategories: string | null) {
 
 function createDemoRecords(categories: ExpenseCategory[]) {
   const timeZone = getCurrentTimeZone();
-  const currentYear = new Date().getFullYear();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
 
-  return DEMO_RECORD_TEMPLATES.map((template, index): ExpenseRecord => {
+  const monthRecords = DEMO_RECORD_TEMPLATES.map((template, index): ExpenseRecord => {
     const occurredDate = new Date(
       currentYear,
-      9,
+      currentMonth,
       template.dayOfMonth,
       template.hour,
       template.minute,
@@ -113,6 +120,31 @@ function createDemoRecords(categories: ExpenseCategory[]) {
       timeZone,
     };
   });
+
+  const todayRecords: ExpenseRecord[] = [
+    { amount: 6200, categoryIndex: 1, memo: '오전 커피', satisfaction: '🙂' },
+    { amount: 13500, categoryIndex: 0, memo: '오늘의 점심', satisfaction: '😍' },
+  ].map((template, index) => {
+    const occurredDate = new Date(currentYear, currentMonth, now.getDate(), 11 + index, index ? 35 : 10, 0, 0);
+    const category = categories[template.categoryIndex % categories.length];
+    const localDate = getLocalDateKey(occurredDate);
+
+    return {
+      amount: template.amount,
+      category: category.name,
+      categoryIcon: category.icon,
+      categoryId: category.id,
+      createdAt: occurredDate.toISOString(),
+      id: `demo-v3-today-${localDate}-${index}`,
+      localDate,
+      memo: template.memo,
+      occurredAt: occurredDate.toISOString(),
+      satisfaction: template.satisfaction,
+      timeZone,
+    };
+  });
+
+  return [...monthRecords, ...todayRecords];
 }
 
 function createDemoDailySatisfactions(records: ExpenseRecord[]): DailySatisfactions {
@@ -141,10 +173,10 @@ function createDemoDailySatisfactions(records: ExpenseRecord[]): DailySatisfacti
   );
 }
 
-export async function ensurePortfolioDemoSeed() {
+export async function ensurePortfolioDemoSeed(options: DemoSeedOptions = {}) {
   const existingGuard = await AsyncStorage.getItem(ACTIVE_DEMO_SEED_GUARD_KEY);
 
-  if (existingGuard !== null) {
+  if (!options.force && existingGuard !== null) {
     return false;
   }
 

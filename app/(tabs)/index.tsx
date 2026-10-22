@@ -113,7 +113,8 @@ const HOME_OPTION_CARD_RADIUS = 12;
 export default function HomeScreen() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
-  const homeOptionCardWidth = (windowWidth - 55) / 5;
+  // 웹에서도 휴대폰 프레임 안에서 카드 폭을 계산한다.
+  const homeOptionCardWidth = (Math.min(windowWidth, 430) - 55) / 5;
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
