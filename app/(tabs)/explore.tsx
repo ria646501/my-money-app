@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 
 import { CategoryIconImage } from '@/components/category-icon-image';
+import { CategoryManagerModal } from '@/components/category-manager-modal';
+import { ExpenseCategorySelector } from '@/components/expense-category-selector';
 import {
   PRIMARY_SATISFACTION_ICON_SIZE,
   SatisfactionIconImage,
@@ -60,6 +62,13 @@ import { queueRewardFeedback } from '@/lib/reward-feedback';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
+const SATISFACTION_BACKGROUNDS: Record<Satisfaction, string> = {
+  '😫': '#EAF3FF',
+  '😕': '#FFF0F7',
+  '😐': '#FFF9DE',
+  '🙂': '#FFF1E6',
+  '😍': '#FFEAF4',
+};
 
 function formatSelectedDate(dateKey: string) {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -73,6 +82,7 @@ export default function CalendarScreen() {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [isMonthPickerVisible, setIsMonthPickerVisible] = useState(false);
+  const [isCategoryManagerVisible, setIsCategoryManagerVisible] = useState(false);
   const [pickerYear, setPickerYear] = useState(() => new Date().getFullYear());
   const [isCalendarScrollEnabled, setIsCalendarScrollEnabled] = useState(true);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
@@ -333,6 +343,31 @@ export default function CalendarScreen() {
   const closeEditModal = () => {
     setEditingRecord(null);
     setAddingDateKey(null);
+  };
+
+  const saveCategories = async (updatedCategories: ExpenseCategory[]) => {
+    const legacyEditingCategoryId =
+      editingRecord !== null &&
+      !categories.some((item) => item.id === editingRecord.categoryId)
+        ? editingRecord.categoryId
+        : null;
+
+    try {
+      await AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updatedCategories));
+      setCategories(updatedCategories);
+      setEditCategoryId((currentId) =>
+        currentId &&
+        (updatedCategories.some((item) => item.id === currentId) ||
+          currentId === legacyEditingCategoryId)
+          ? currentId
+          : null
+      );
+      return true;
+    } catch (error) {
+      console.error('달력에서 카테고리를 저장하지 못했습니다.', error);
+      Alert.alert('카테고리를 저장하지 못했어요', '잠시 후 다시 시도해 주세요.');
+      return false;
+    }
   };
 
   const saveEditedRecord = async () => {
@@ -931,31 +966,16 @@ export default function CalendarScreen() {
 
                 <View style={styles.editSection}>
                   <Text style={styles.editLabel}>카테고리</Text>
-                  <View style={styles.editOptionGrid}>
-                    {editCategoryOptions.map((item) => {
-                      const isSelected = editCategoryId === item.id;
-
-                      return (
-                        <Pressable
-                          accessibilityLabel={item.name}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: isSelected }}
-                          key={item.id}
-                          onPress={() => setEditCategoryId(item.id)}
-                          style={({ pressed }) => [
-                            styles.editCategoryButton,
-                            isSelected && styles.editCategoryButtonSelected,
-                            pressed && styles.buttonPressed,
-                          ]}>
-                          <CategoryIconImage icon={item.icon} size={42} />
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                  <ExpenseCategorySelector
+                    categories={editCategoryOptions}
+                    onManageCategories={() => setIsCategoryManagerVisible(true)}
+                    onSelect={setEditCategoryId}
+                    selectedCategoryId={editCategoryId}
+                  />
                 </View>
 
                 <View style={styles.editSection}>
-                  <Text style={styles.editLabel}>개별 소비 만족도</Text>
+                  <Text style={styles.editLabel}>이 소비는 어땠어?</Text>
                   <View style={styles.editSatisfactionRow}>
                     {SATISFACTIONS.map((item) => {
                       const isSelected = editSatisfaction === item;
@@ -969,10 +989,14 @@ export default function CalendarScreen() {
                           onPress={() => setEditSatisfaction(item)}
                           style={({ pressed }) => [
                             styles.editSatisfactionButton,
+                            { backgroundColor: SATISFACTION_BACKGROUNDS[item] },
                             isSelected && styles.editSatisfactionButtonSelected,
                             pressed && styles.buttonPressed,
                           ]}>
-                          <SatisfactionIconImage satisfaction={item} size={34} />
+                          <SatisfactionIconImage
+                            satisfaction={item}
+                            size={PRIMARY_SATISFACTION_ICON_SIZE}
+                          />
                         </Pressable>
                       );
                     })}
@@ -1039,6 +1063,13 @@ export default function CalendarScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <CategoryManagerModal
+        categories={categories}
+        onCategoriesChange={saveCategories}
+        onClose={() => setIsCategoryManagerVisible(false)}
+        visible={isCategoryManagerVisible}
+      />
     </SafeAreaView>
   );
 }
@@ -1522,22 +1553,20 @@ const styles = StyleSheet.create({
   },
   editSatisfactionRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 1,
   },
   editSatisfactionButton: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E3E7DF',
+    borderColor: '#EEDDE5',
     borderRadius: 12,
     borderWidth: 1,
     flex: 1,
-    height: 46,
+    height: 70,
     justifyContent: 'center',
   },
   editSatisfactionButtonSelected: {
-    backgroundColor: BrandColors.primarySoft,
-    borderColor: BrandColors.primary,
-    borderWidth: 2,
+    borderColor: '#FF75AB',
+    borderWidth: 1.5,
   },
   editSatisfactionEmoji: {
     fontSize: 24,

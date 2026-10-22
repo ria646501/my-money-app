@@ -946,6 +946,7 @@ export default function HomeScreen() {
         categories={categories}
         onClose={() => setEditingRecord(null)}
         onDelete={confirmDeleteRecord}
+        onManageCategories={() => setIsCategoryManagerVisible(true)}
         onSave={saveEditedRecord}
         record={editingRecord}
       />

@@ -14,10 +14,7 @@ import {
 } from 'react-native';
 
 import { TimeWheelPicker } from '@/components/time-wheel-picker';
-import {
-  CategoryIconImage,
-  PRIMARY_CATEGORY_ICON_SIZE,
-} from '@/components/category-icon-image';
+import { ExpenseCategorySelector } from '@/components/expense-category-selector';
 import {
   PRIMARY_SATISFACTION_ICON_SIZE,
   SatisfactionIconImage,
@@ -54,6 +51,7 @@ type ExpenseRecordEditorProps = {
   record: ExpenseRecord | null;
   onClose: () => void;
   onDelete: (record: ExpenseRecord) => void;
+  onManageCategories: () => void;
   onSave: (record: ExpenseRecord, values: ExpenseEditValues) => void | Promise<void>;
 };
 
@@ -67,6 +65,7 @@ export function ExpenseRecordEditor({
   record,
   onClose,
   onDelete,
+  onManageCategories,
   onSave,
 }: ExpenseRecordEditorProps) {
   const scrollRef = useRef<ScrollView>(null);
@@ -143,6 +142,8 @@ export function ExpenseRecordEditor({
             useNativeDriver: true,
           }).start();
         },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
       }),
     [onClose, sheetTranslateY]
   );
@@ -174,8 +175,10 @@ export function ExpenseRecordEditor({
               nestedScrollEnabled
               ref={scrollRef}
               showsVerticalScrollIndicator={false}>
-              <View {...dragResponder.panHandlers} style={styles.dragRegion}>
-                <View style={styles.sheetHandle} />
+              <View style={styles.dragRegion}>
+                <View {...dragResponder.panHandlers} style={styles.dragHandleRegion}>
+                  <View style={styles.sheetHandle} />
+                </View>
                 <View style={styles.header}>
                   <View>
                     <Text style={styles.title}>소비 기록 수정</Text>
@@ -215,37 +218,12 @@ export function ExpenseRecordEditor({
 
               <View style={styles.section}>
                 <Text style={styles.label}>카테고리</Text>
-                <View style={styles.optionGrid}>
-                  {categoryOptions.map((item) => {
-                    const isSelected = categoryId === item.id;
-
-                    return (
-                      <Pressable
-                        accessibilityLabel={item.name}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: isSelected }}
-                        key={item.id}
-                        onPress={() => setCategoryId(item.id)}
-                        style={({ pressed }) => [
-                          styles.categoryButton,
-                          isSelected && styles.categoryButtonSelected,
-                          pressed && styles.pressed,
-                        ]}>
-                        <CategoryIconImage
-                          icon={item.icon}
-                          size={PRIMARY_CATEGORY_ICON_SIZE}
-                        />
-                        <Text
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.75}
-                          numberOfLines={1}
-                          style={styles.categoryName}>
-                          {item.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <ExpenseCategorySelector
+                  categories={categoryOptions}
+                  onManageCategories={onManageCategories}
+                  onSelect={setCategoryId}
+                  selectedCategoryId={categoryId}
+                />
               </View>
 
               <View style={styles.section}>
@@ -355,12 +333,13 @@ const styles = StyleSheet.create({
   },
   content: { paddingBottom: 28, paddingHorizontal: 20, paddingTop: 10 },
   dragRegion: { marginHorizontal: -20, paddingHorizontal: 20 },
+  dragHandleRegion: { marginHorizontal: -20, paddingBottom: 8, paddingHorizontal: 20, paddingTop: 2 },
   sheetHandle: {
     alignSelf: 'center',
     backgroundColor: '#E8DCE4',
     borderRadius: 3,
     height: 5,
-    marginBottom: 16,
+    marginBottom: 8,
     width: 48,
   },
   header: {

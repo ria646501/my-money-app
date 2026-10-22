@@ -21,6 +21,7 @@ import {
   ExpenseRecord,
   migrateExpenseRecord,
   RECORDS_STORAGE_KEY,
+  SATISFACTIONS,
   Satisfaction,
   StoredExpenseRecord,
 } from '@/lib/expense-record';
@@ -263,7 +264,25 @@ export default function StatisticsScreen() {
   const topDailySatisfaction = dailySatisfactionBreakdown[0] ?? null;
   const currentCharacterStage = getCharacterStage(growthState.totalExp);
   const categorySatisfactionRanking = useMemo(
-    () => getCategorySatisfactionRanking(monthlyRecords),
+    () => getCategorySatisfactionRanking(monthlyRecords, monthlyRecords.length),
+    [monthlyRecords]
+  );
+  const spendingSatisfactionPatterns = useMemo(
+    () =>
+      SATISFACTIONS.map((satisfaction) => {
+        const matchingRecords = monthlyRecords.filter(
+          (record) => record.satisfaction === satisfaction
+        );
+        const totalAmount = getMonthlyTotal(matchingRecords);
+
+        return {
+          averageAmount:
+            matchingRecords.length > 0 ? Math.round(totalAmount / matchingRecords.length) : 0,
+          count: matchingRecords.length,
+          satisfaction,
+          totalAmount,
+        };
+      }).filter((item) => item.count > 0),
     [monthlyRecords]
   );
   const categoryDonutSegments = useMemo<DonutSegment[]>(
@@ -275,16 +294,6 @@ export default function StatisticsScreen() {
       })),
     [categoryBreakdown]
   );
-  const dailySatisfactionDonutSegments = useMemo<DonutSegment[]>(
-    () =>
-      dailySatisfactionBreakdown.map((item) => ({
-        color: SATISFACTION_COLORS[item.satisfaction],
-        key: item.satisfaction,
-        percentage: item.percentage,
-      })),
-    [dailySatisfactionBreakdown]
-  );
-
   const moveMonth = (amount: number) => {
     setVisibleMonth((currentMonth) =>
       new Date(currentMonth.getFullYear(), currentMonth.getMonth() + amount, 1)
@@ -317,30 +326,140 @@ export default function StatisticsScreen() {
           </Pressable>
         </View>
 
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryCopy}>
-            <Text style={styles.summaryLabel}>총 소비 금액</Text>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={styles.summaryAmount}>
-              {monthlyTotal.toLocaleString('ko-KR')}원
-            </Text>
-            <Text style={styles.comparisonText}>{comparisonText}</Text>
+        <View style={styles.satisfactionHero}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroEyebrow}>이번 달 소비 만족도</Text>
+            {topDailySatisfaction ? (
+              <>
+                <Text style={styles.heroTitle}>
+                  {SATISFACTION_LABELS[topDailySatisfaction.satisfaction]}
+                </Text>
+                <Text style={styles.heroCaption}>
+                  {SATISFACTION_REVIEW_TEXT[topDailySatisfaction.satisfaction]}
+                </Text>
+                <Text style={styles.heroCount}>{dailySatisfactionDayCount}일의 하루 회고</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.heroTitle}>아직 기록을 기다리고 있어요</Text>
+                <Text style={styles.heroCaption}>하루 소비 만족도를 남기면 이달의 흐름을 보여드려요.</Text>
+              </>
+            )}
           </View>
-          <View style={styles.characterSlot}>
-            <View style={styles.summarySpeechBubble}>
-              <Text numberOfLines={1} style={styles.summarySpeechText}>이번 달도 기록했네!</Text>
+          {topDailySatisfaction ? (
+            <View style={styles.heroIcon}>
+              <SatisfactionIconImage
+                satisfaction={topDailySatisfaction.satisfaction}
+                size={76}
+              />
             </View>
-            <CharacterVisual
-              maxSize={94}
-              stageId={currentCharacterStage.id}
-              style={styles.characterImage}
-            />
-          </View>
+          ) : null}
         </View>
 
-        <View style={styles.chartSection}>
-          <Text style={styles.sectionTitle}>이번 달엔 어디에 가장 많이 썼을까? ✧</Text>
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>하루 만족도 분포 ✧</Text>
+          {dailySatisfactionBreakdown.length === 0 ? (
+            <View style={styles.compactEmptyState}>
+              <Text style={styles.emptyText}>하루 소비 만족도를 기록하면 분포를 볼 수 있어요.</Text>
+            </View>
+          ) : (
+            <View style={styles.horizontalChart}>
+              {dailySatisfactionBreakdown.map((item) => (
+                <View key={item.satisfaction} style={styles.horizontalRow}>
+                  <SatisfactionIconImage satisfaction={item.satisfaction} size={30} />
+                  <View style={styles.horizontalBarCopy}>
+                    <View style={styles.horizontalLabelRow}>
+                      <Text style={styles.horizontalLabel}>
+                        {SATISFACTION_LABELS[item.satisfaction]}
+                      </Text>
+                      <Text style={styles.horizontalValue}>{item.count}일 · {item.percentage}%</Text>
+                    </View>
+                    <View style={styles.horizontalTrack}>
+                      <View
+                        style={[
+                          styles.horizontalFill,
+                          {
+                            backgroundColor: SATISFACTION_COLORS[item.satisfaction],
+                            width: `${item.percentage}%`,
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>카테고리별 평균 개별 소비 만족도 ✧</Text>
+          {categorySatisfactionRanking.length === 0 ? (
+            <View style={styles.compactEmptyState}>
+              <Text style={styles.emptyText}>개별 소비 만족도를 기록하면 비교할 수 있어요.</Text>
+            </View>
+          ) : (
+            <View style={styles.categoryAverageList}>
+              {categorySatisfactionRanking.map((item) => (
+                <View key={item.categoryId} style={styles.categoryAverageRow}>
+                  <View style={styles.categoryAverageHeader}>
+                    <View style={styles.categoryAverageIdentity}>
+                      <CategoryIconImage icon={item.categoryIcon} size={30} />
+                      <Text numberOfLines={1} style={styles.categoryAverageName}>
+                        {item.categoryName}
+                      </Text>
+                    </View>
+                    <Text style={styles.categoryAverageScore}>
+                      {item.averageSatisfaction.toFixed(1)} / 5
+                    </Text>
+                  </View>
+                  <View style={styles.categoryAverageTrack}>
+                    <View
+                      style={[
+                        styles.categoryAverageFill,
+                        { width: `${(item.averageSatisfaction / 5) * 100}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.categoryAverageMeta}>
+                    {item.recordCount}건 · {item.totalAmount.toLocaleString('ko-KR')}원
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>금액 × 개별 소비 만족도 ✧</Text>
+          <Text style={styles.sectionDescription}>각 만족도로 기록한 소비의 평균 금액을 함께 보여드려요.</Text>
+          {spendingSatisfactionPatterns.length === 0 ? (
+            <View style={styles.compactEmptyState}>
+              <Text style={styles.emptyText}>이번 달 소비 기록이 아직 없어요.</Text>
+            </View>
+          ) : (
+            <View style={styles.patternList}>
+              {spendingSatisfactionPatterns.map((item) => (
+                <View key={item.satisfaction} style={styles.patternRow}>
+                  <SatisfactionIconImage satisfaction={item.satisfaction} size={34} />
+                  <View style={styles.patternCopy}>
+                    <Text style={styles.patternLabel}>{SATISFACTION_LABELS[item.satisfaction]}</Text>
+                    <Text style={styles.patternMeta}>{item.count}건 · 합계 {item.totalAmount.toLocaleString('ko-KR')}원</Text>
+                  </View>
+                  <View style={styles.patternAmountCopy}>
+                    <Text style={styles.patternAmount}>{item.averageAmount.toLocaleString('ko-KR')}원</Text>
+                    <Text style={styles.patternAmountLabel}>건당 평균</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>카테고리별 소비 금액 ✧</Text>
           {categoryBreakdown.length === 0 ? (
-            <View style={styles.emptyState}>
+            <View style={styles.compactEmptyState}>
               <Text style={styles.emptyText}>아직 이번 달 소비 기록이 없어요.</Text>
             </View>
           ) : (
@@ -353,26 +472,16 @@ export default function StatisticsScreen() {
               />
               <View style={styles.legend}>
                 {categoryBreakdown.map((item, index) => (
-                  <View
-                    key={item.categoryId}
-                    style={[styles.legendRow, index === 0 && styles.legendRowTop]}>
+                  <View key={item.categoryId} style={[styles.legendRow, index === 0 && styles.legendRowTop]}>
                     <View
                       style={[
                         styles.legendDot,
-                        {
-                          backgroundColor: item.isAggregated
-                            ? '#B8B2C5'
-                            : getStableCategoryColor(item.categoryId),
-                        },
+                        { backgroundColor: item.isAggregated ? '#B8B2C5' : getStableCategoryColor(item.categoryId) },
                       ]}
                     />
-                    <View style={styles.legendCopy}>
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.legendName, index === 0 && styles.legendNameTop]}>
-                        {item.categoryName}
-                      </Text>
-                    </View>
+                    <Text numberOfLines={1} style={[styles.legendName, index === 0 && styles.legendNameTop]}>
+                      {item.categoryName}
+                    </Text>
                     <Text style={styles.legendPercentage}>{item.percentage}%</Text>
                   </View>
                 ))}
@@ -381,88 +490,15 @@ export default function StatisticsScreen() {
           )}
         </View>
 
-        <View style={styles.insightSection}>
-          <Text style={styles.sectionTitle}>이달의 소비 만족도는? ✧</Text>
-          {dailySatisfactionBreakdown.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>하루 소비 만족도를 기록하면 함께 돌아볼 수 있어요.</Text>
-            </View>
-          ) : (
-            <View style={styles.chartWithSummary}>
-              <View style={styles.breakdownContent}>
-                <DonutChart
-                  accessibilityLabel={`이번 달 하루 소비 만족도 ${dailySatisfactionDayCount}일`}
-                  centerLabel="회고"
-                  centerValue={`${dailySatisfactionDayCount}일`}
-                  segments={dailySatisfactionDonutSegments}
-                />
-                <View style={styles.legend}>
-                  {dailySatisfactionBreakdown.map((item, index) => (
-                    <View
-                      key={item.satisfaction}
-                      style={[styles.legendRow, index === 0 && styles.legendRowTop]}>
-                      <View
-                        style={[
-                          styles.legendDot,
-                          { backgroundColor: SATISFACTION_COLORS[item.satisfaction] },
-                        ]}
-                      />
-                      <View style={styles.legendCopy}>
-                        <Text
-                          numberOfLines={1}
-                          style={[styles.legendName, index === 0 && styles.legendNameTop]}>
-                          {SATISFACTION_LABELS[item.satisfaction]}
-                        </Text>
-                      </View>
-                      <Text style={styles.legendPercentage}>
-                        {item.count}일 · {item.percentage}%
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-              {topDailySatisfaction ? (
-                <View style={styles.satisfactionSummary}>
-                  <SatisfactionIconImage
-                    satisfaction={topDailySatisfaction.satisfaction}
-                    size={24}
-                  />
-                  <Text
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.8}
-                    numberOfLines={1}
-                    style={styles.satisfactionSummaryText}>
-                    {SATISFACTION_REVIEW_TEXT[topDailySatisfaction.satisfaction]}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-          )}
-        </View>
-
-        <View style={styles.insightSection}>
-          <Text style={styles.sectionTitle}>어떤 소비가 가장 만족스러웠을까? ✧</Text>
-          {categorySatisfactionRanking.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>아직 이번 달 소비 기록이 없어요.</Text>
-            </View>
-          ) : (
-            <View style={styles.rankingCard}>
-              {categorySatisfactionRanking.map((item, index) => (
-                <View key={item.categoryId} style={styles.rankingRow}>
-                  <Text style={styles.rankingNumber}>{index + 1}</Text>
-                  <View style={styles.rankingIcon}>
-                    <CategoryIconImage icon={item.categoryIcon} size={32} />
-                  </View>
-                  <Text numberOfLines={1} style={styles.rankingName}>{item.categoryName}</Text>
-                  <View style={styles.rankingMetrics}>
-                    <Text style={styles.rankingScore}>{item.averageSatisfaction.toFixed(1)}/5</Text>
-                    <Text style={styles.rankingCount}>{item.recordCount}건</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
+        <View style={styles.totalSummaryCard}>
+          <View style={styles.totalSummaryCopy}>
+            <Text style={styles.summaryLabel}>이번 달 총 소비 금액</Text>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={styles.totalSummaryAmount}>
+              {monthlyTotal.toLocaleString('ko-KR')}원
+            </Text>
+            <Text style={styles.comparisonText}>{comparisonText}</Text>
+          </View>
+          <CharacterVisual maxSize={66} stageId={currentCharacterStage.id} />
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -574,7 +610,7 @@ const styles = StyleSheet.create({
   legendRowTop: { backgroundColor: '#FFF0F7', borderColor: '#F4BDD7' },
   legendDot: { borderRadius: 5, height: 10, marginRight: 7, width: 10 },
   legendCopy: { flex: 1 },
-  legendName: { color: BrandColors.text, fontSize: 12, fontWeight: '700' },
+  legendName: { color: BrandColors.text, flex: 1, fontSize: 12, fontWeight: '700' },
   legendNameTop: { color: '#D94E87', fontWeight: '900' },
   legendPercentage: { color: BrandColors.textMuted, fontSize: 12, fontWeight: '800', marginLeft: 5 },
   insightSection: { paddingTop: 2 },
@@ -598,4 +634,84 @@ const styles = StyleSheet.create({
   rankingMetrics: { alignItems: 'flex-end', marginLeft: 8 },
   rankingScore: { color: '#F0649C', fontSize: 14, fontWeight: '900' },
   rankingCount: { color: '#93889F', fontSize: 11, marginTop: 3 },
+  satisfactionHero: {
+    alignItems: 'center',
+    backgroundColor: '#FFF0F7',
+    borderColor: '#F4BDD7',
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 158,
+    overflow: 'hidden',
+    padding: 18,
+  },
+  heroCopy: { flex: 1, paddingRight: 8 },
+  heroEyebrow: { color: '#A46C84', fontSize: 12, fontWeight: '900' },
+  heroTitle: { color: '#302D55', fontSize: 21, fontWeight: '900', marginTop: 8 },
+  heroCaption: { color: '#756A80', fontSize: 11, lineHeight: 17, marginTop: 6 },
+  heroCount: { color: '#F0649C', fontSize: 11, fontWeight: '800', marginTop: 8 },
+  heroIcon: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#F7D6E4',
+    borderRadius: 48,
+    borderWidth: 1,
+    height: 96,
+    justifyContent: 'center',
+    width: 96,
+  },
+  sectionCard: {
+    backgroundColor: '#FFFCFA',
+    borderColor: '#EADFE7',
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+  },
+  sectionDescription: { color: '#8D8198', fontSize: 11, lineHeight: 16, marginBottom: 10, marginTop: -5 },
+  compactEmptyState: {
+    alignItems: 'center',
+    backgroundColor: '#FFF8F4',
+    borderRadius: 12,
+    justifyContent: 'center',
+    minHeight: 82,
+    paddingHorizontal: 12,
+  },
+  horizontalChart: { gap: 12 },
+  horizontalRow: { alignItems: 'center', flexDirection: 'row', gap: 10 },
+  horizontalBarCopy: { flex: 1 },
+  horizontalLabelRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  horizontalLabel: { color: '#4E4665', flex: 1, fontSize: 11, fontWeight: '800' },
+  horizontalValue: { color: '#8E8299', fontSize: 10, fontWeight: '700', marginLeft: 8 },
+  horizontalTrack: { backgroundColor: '#F1EAF3', borderRadius: 5, height: 8, marginTop: 5, overflow: 'hidden' },
+  horizontalFill: { borderRadius: 5, height: '100%' },
+  categoryAverageList: { gap: 15 },
+  categoryAverageRow: { borderBottomColor: '#F1E7EC', borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: 12 },
+  categoryAverageHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  categoryAverageIdentity: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 8, minWidth: 0 },
+  categoryAverageName: { color: '#413958', flex: 1, fontSize: 13, fontWeight: '800' },
+  categoryAverageScore: { color: '#F0649C', fontSize: 13, fontWeight: '900', marginLeft: 8 },
+  categoryAverageTrack: { backgroundColor: '#F0E8F3', borderRadius: 5, height: 8, marginTop: 7, overflow: 'hidden' },
+  categoryAverageFill: { backgroundColor: '#C49BEC', borderRadius: 5, height: '100%' },
+  categoryAverageMeta: { color: '#94899E', fontSize: 10, marginTop: 5 },
+  patternList: { gap: 4 },
+  patternRow: { alignItems: 'center', borderBottomColor: '#F1E7EC', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 62 },
+  patternCopy: { flex: 1, marginLeft: 9, minWidth: 0 },
+  patternLabel: { color: '#4A425E', fontSize: 12, fontWeight: '800' },
+  patternMeta: { color: '#978B9F', fontSize: 9, marginTop: 4 },
+  patternAmountCopy: { alignItems: 'flex-end', marginLeft: 8 },
+  patternAmount: { color: '#6E5B89', fontSize: 12, fontWeight: '900' },
+  patternAmountLabel: { color: '#A095A8', fontSize: 9, marginTop: 3 },
+  totalSummaryCard: {
+    alignItems: 'center',
+    backgroundColor: '#EDE1FF',
+    borderColor: '#D7BDFB',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 94,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  totalSummaryCopy: { flex: 1 },
+  totalSummaryAmount: { color: '#302D55', fontSize: 23, fontWeight: '900', marginTop: 4, maxWidth: 230 },
 });

@@ -1,7 +1,11 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { CharacterVisual } from '@/components/character-visual';
 import { CharacterStage, GROWTH_CONFIG } from '@/lib/growth';
+
+const BACKGROUND_SOURCE = require('@/assets/characters/growth-celebration-modal-bg.png');
+const REFERENCE_WIDTH = 393;
+const REFERENCE_HEIGHT = 698;
 
 const LEVEL_BY_STAGE: Record<CharacterStage['id'], number> = {
   EGG: 1,
@@ -9,6 +13,14 @@ const LEVEL_BY_STAGE: Record<CharacterStage['id'], number> = {
   GROWING_CHICKEN: 3,
   CHICKEN: 4,
   MYSTERY: 5,
+};
+
+const CELEBRATION_NAME_BY_STAGE: Record<CharacterStage['id'], string> = {
+  EGG: '알',
+  CHICK: '삐약이',
+  GROWING_CHICKEN: '중닭',
+  CHICKEN: '닭',
+  MYSTERY: '???',
 };
 
 type GrowthCelebrationModalProps = {
@@ -22,10 +34,16 @@ export function GrowthCelebrationModal({
   stageId,
   totalExp,
 }: GrowthCelebrationModalProps) {
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const canvasScale = Math.min(windowWidth / REFERENCE_WIDTH, windowHeight / REFERENCE_HEIGHT, 1);
   const stageIndex = GROWTH_CONFIG.stages.findIndex((stage) => stage.id === stageId);
   const stage = stageIndex >= 0 ? GROWTH_CONFIG.stages[stageIndex] : null;
+  const previousStage = stageIndex > 0 ? GROWTH_CONFIG.stages[stageIndex - 1] : null;
   const nextStage = stageIndex >= 0 ? GROWTH_CONFIG.stages[stageIndex + 1] ?? null : null;
+  const stageExpRange = stage && nextStage ? nextStage.minimumExp - stage.minimumExp : 0;
+  const currentExpInStage = stage ? Math.max(0, totalExp - stage.minimumExp) : 0;
   const remainingExp = nextStage ? Math.max(0, nextStage.minimumExp - totalExp) : 0;
+  const progress = stageExpRange > 0 ? Math.min(1, currentExpInStage / stageExpRange) : 1;
 
   return (
     <Modal
@@ -34,42 +52,63 @@ export function GrowthCelebrationModal({
       transparent
       visible={stage !== null}>
       <View style={styles.backdrop}>
-        <View accessibilityViewIsModal style={styles.card}>
-          <Text style={[styles.confetti, styles.confettiLeft]}>✦</Text>
-          <Text style={[styles.confetti, styles.confettiRight]}>✧</Text>
-          <Text style={[styles.sparkle, styles.sparkleLeft]}>✦</Text>
-          <Text style={[styles.sparkle, styles.sparkleRight]}>✦</Text>
+        <View
+          accessibilityViewIsModal
+          style={[
+            styles.scaledFrame,
+            {
+              height: REFERENCE_HEIGHT * canvasScale,
+              width: REFERENCE_WIDTH * canvasScale,
+            },
+          ]}>
+          <View style={[styles.canvas, { transform: [{ scale: canvasScale }] }]}>
+            <Image resizeMode="contain" source={BACKGROUND_SOURCE} style={styles.backgroundImage} />
 
-          <View style={styles.titlePill}>
             <Text style={styles.title}>성장했어요!</Text>
-          </View>
-          <Text style={styles.subtitle}>꾸준한 기록으로 한 단계 더 자랐어요</Text>
 
-          {stage ? (
-            <View style={styles.characterHalo}>
-              <CharacterVisual maxSize={150} stageId={stage.id} />
+            {stage ? (
+              <>
+                <Text style={styles.levelText}>
+                  {previousStage
+                    ? `Lv.${LEVEL_BY_STAGE[previousStage.id]} ${CELEBRATION_NAME_BY_STAGE[previousStage.id]} → `
+                    : ''}
+                  Lv.{LEVEL_BY_STAGE[stage.id]} {CELEBRATION_NAME_BY_STAGE[stage.id]}
+                </Text>
+
+                <View style={styles.character}>
+                  <CharacterVisual maxSize={230} stageId={stage.id} />
+                </View>
+
+                <Text style={styles.stageName}>
+                  Lv.{LEVEL_BY_STAGE[stage.id]} · {CELEBRATION_NAME_BY_STAGE[stage.id]}
+                </Text>
+              </>
+            ) : null}
+
+            <Text style={styles.subtitle}>차곡차곡 쌓인 기록 덕분에 한 뼘 자랐어요</Text>
+
+            <View style={styles.progressCard}>
+              <View style={styles.progressHeader}>
+                <Text style={styles.progressLabel}>
+                  {nextStage ? `다음 성장까지 ${remainingExp} EXP` : '모든 성장 단계 달성'}
+                </Text>
+                <Text style={styles.progressValue}>
+                  {nextStage ? `${currentExpInStage}/${stageExpRange}` : '완료'}
+                </Text>
+              </View>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+              </View>
             </View>
-          ) : null}
 
-          {stage ? (
-            <Text style={styles.stageName}>
-              Lv.{LEVEL_BY_STAGE[stage.id]} · {stage.name}
-            </Text>
-          ) : null}
-
-          <View style={styles.nextCard}>
-            <Text style={styles.nextLabel}>다음 성장까지</Text>
-            <Text style={styles.nextValue}>
-              {nextStage ? `${remainingExp} EXP 남았어요` : '모든 성장 단계를 달성했어요!'}
-            </Text>
+            <Pressable
+              accessibilityLabel="성장 축하 팝업 확인"
+              accessibilityRole="button"
+              onPress={onConfirm}
+              style={({ pressed }) => [styles.confirmButton, pressed && styles.confirmPressed]}>
+              <Text style={styles.confirmText}>확인</Text>
+            </Pressable>
           </View>
-
-          <Pressable
-            accessibilityRole="button"
-            onPress={onConfirm}
-            style={({ pressed }) => [styles.confirmButton, pressed && styles.confirmPressed]}>
-            <Text style={styles.confirmText}>확인</Text>
-          </Pressable>
         </View>
       </View>
     </Modal>
@@ -79,78 +118,123 @@ export function GrowthCelebrationModal({
 const styles = StyleSheet.create({
   backdrop: {
     alignItems: 'center',
-    backgroundColor: 'rgba(48, 45, 85, 0.38)',
+    backgroundColor: 'rgba(45, 40, 66, 0.48)',
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 28,
   },
-  card: {
-    alignItems: 'center',
-    backgroundColor: '#FFF9EF',
-    borderColor: '#F4C5D9',
-    borderRadius: 28,
-    borderWidth: 2,
-    maxWidth: 360,
-    overflow: 'hidden',
-    paddingBottom: 22,
-    paddingHorizontal: 24,
-    paddingTop: 25,
-    position: 'relative',
-    width: '100%',
-  },
-  characterHalo: {
-    alignItems: 'center',
-    backgroundColor: '#F1E5FF',
-    borderColor: '#E3CCFA',
-    borderRadius: 94,
-    borderWidth: 2,
-    height: 188,
-    justifyContent: 'center',
-    marginTop: 18,
-    width: 188,
-  },
-  confetti: {
-    color: '#FF7DAE',
-    fontSize: 25,
-    fontWeight: '900',
+  backgroundImage: {
+    height: REFERENCE_HEIGHT,
+    left: 0,
     position: 'absolute',
-    top: 30,
+    top: 0,
+    width: REFERENCE_WIDTH,
   },
-  confettiLeft: { left: 25, transform: [{ rotate: '-18deg' }] },
-  confettiRight: { right: 25, transform: [{ rotate: '18deg' }] },
+  canvas: {
+    height: REFERENCE_HEIGHT,
+    left: '50%',
+    marginLeft: -(REFERENCE_WIDTH / 2),
+    marginTop: -(REFERENCE_HEIGHT / 2),
+    position: 'absolute',
+    top: '50%',
+    width: REFERENCE_WIDTH,
+  },
+  character: {
+    alignItems: 'center',
+    height: 230,
+    justifyContent: 'center',
+    left: 81.5,
+    position: 'absolute',
+    top: 157,
+    width: 230,
+  },
   confirmButton: {
     alignItems: 'center',
-    backgroundColor: '#F277A7',
-    borderRadius: 14,
+    height: 49,
     justifyContent: 'center',
-    marginTop: 18,
-    minHeight: 48,
-    width: '100%',
+    left: 44,
+    position: 'absolute',
+    top: 578,
+    width: 305,
   },
-  confirmPressed: { opacity: 0.78 },
-  confirmText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
-  nextCard: {
-    alignItems: 'center',
-    backgroundColor: '#FFF0F6',
-    borderColor: '#F7CADC',
-    borderRadius: 15,
+  confirmPressed: { opacity: 0.72 },
+  confirmText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  levelText: {
+    color: '#3D385B',
+    fontSize: 13,
+    fontWeight: '800',
+    left: 74,
+    position: 'absolute',
+    textAlign: 'center',
+    top: 122,
+    width: 245,
+  },
+  progressCard: {
+    backgroundColor: '#F9F3FF',
+    borderColor: '#E5D5F0',
+    borderRadius: 14,
     borderWidth: 1,
-    marginTop: 16,
-    paddingVertical: 11,
+    height: 59,
+    left: 44,
+    paddingHorizontal: 13,
+    paddingTop: 12,
+    position: 'absolute',
+    top: 492,
+    width: 305,
+  },
+  progressFill: {
+    backgroundColor: '#F48BB4',
+    borderRadius: 4,
+    height: '100%',
+  },
+  progressHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  progressLabel: { color: '#343153', fontSize: 12, fontWeight: '800' },
+  progressTrack: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#F6BAD3',
+    borderRadius: 4,
+    borderWidth: 1,
+    height: 8,
+    marginTop: 10,
+    overflow: 'hidden',
     width: '100%',
   },
-  nextLabel: { color: '#8A7894', fontSize: 11, fontWeight: '700' },
-  nextValue: { color: '#554269', fontSize: 14, fontWeight: '900', marginTop: 3 },
-  sparkle: { color: '#AD8BE5', fontSize: 18, position: 'absolute' },
-  sparkleLeft: { left: 35, top: 185 },
-  sparkleRight: { right: 34, top: 156 },
-  stageName: { color: '#3E365C', fontSize: 20, fontWeight: '900', marginTop: 12 },
-  subtitle: { color: '#897A91', fontSize: 12, marginTop: 9 },
-  title: { color: '#F0649C', fontSize: 23, fontWeight: '900' },
-  titlePill: {
-    backgroundColor: '#FFE9F2',
-    borderRadius: 22,
-    paddingHorizontal: 21,
-    paddingVertical: 8,
+  progressValue: { color: '#918AA6', fontSize: 11, fontWeight: '500' },
+  scaledFrame: {
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  stageName: {
+    color: '#343153',
+    fontSize: 21,
+    fontWeight: '900',
+    left: 44,
+    position: 'absolute',
+    textAlign: 'center',
+    top: 415,
+    width: 305,
+  },
+  subtitle: {
+    color: '#9891A5',
+    fontSize: 12,
+    left: 44,
+    position: 'absolute',
+    textAlign: 'center',
+    top: 450,
+    width: 305,
+  },
+  title: {
+    color: '#343153',
+    fontSize: 28,
+    fontWeight: '900',
+    left: 44,
+    letterSpacing: -0.7,
+    position: 'absolute',
+    textAlign: 'center',
+    top: 67,
+    width: 305,
   },
 });
